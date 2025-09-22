@@ -2,7 +2,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from pyrogram import Client
 from config import Config
-from handlers import *  # register handlers
+from handlers import register_handlers  # register handlers
 
 app = FastAPI()
 
@@ -13,6 +13,8 @@ pyro = Client(
     bot_token=Config.BOT_TOKEN,
     sleep_threshold=0
 )
+
+register_handlers(pyro)
 
 @app.on_event("startup")
 async def startup():
