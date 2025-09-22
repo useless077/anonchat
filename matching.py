@@ -1,4 +1,4 @@
-from .db import users, queue
+from db import users, queue
 from datetime import datetime
 from config import Config
 
