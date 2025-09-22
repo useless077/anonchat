@@ -14,7 +14,6 @@ pyro = Client(
     sleep_threshold=0
 )
 
-register_handlers(pyro)
 
 @app.on_event("startup")
 async def startup():
