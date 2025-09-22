@@ -1,35 +1,48 @@
-import uvicorn
-from fastapi import FastAPI, Request
+# webhook_app.py
+import asyncio
+from fastapi import FastAPI
 from pyrogram import Client
-from config import Config
-from handlers import *  # register handlers
+import os
 
+# FastAPI app
 app = FastAPI()
 
+# Pyrogram client
+API_ID = int(os.environ.get("API_ID"))
+API_HASH = os.environ.get("API_HASH")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")  # if using bot
+
 pyro = Client(
-    "anon_chat_bot",
-    api_id=Config.API_ID,
-    api_hash=Config.API_HASH,
-    bot_token=Config.BOT_TOKEN,
-    sleep_threshold=0
+    "bot_session",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN
 )
 
-
+# ---- Lifespan events for FastAPI ----
 @app.on_event("startup")
-async def startup():
-    await pyro.start()
+async def startup_event():
+    # Start Pyrogram client
+    try:
+        await pyro.start()
+        print("Pyrogram started successfully.")
+    except Exception as e:
+        print("Failed to start Pyrogram:", e)
+        # You can optionally raise here to stop app
+        raise e
 
 @app.on_event("shutdown")
-async def shutdown():
+async def shutdown_event():
+    # Stop Pyrogram client
     await pyro.stop()
+    print("Pyrogram stopped.")
 
-@app.post("/webhook/{token}")
-async def webhook(token: str, request: Request):
-    if token != Config.BOT_TOKEN:
-        return {"status": "forbidden"}
-    data = await request.json()
-    await pyro.process_updates([data])
-    return {"ok": True}
+# ---- Example webhook route ----
+@app.get("/")
+async def root():
+    return {"status": "ok"}
 
+# ---- Optional: run only if local testing ----
 if __name__ == "__main__":
-    uvicorn.run("webhook_app:app", host="0.0.0.0", port=Config.PORT)
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
