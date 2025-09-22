@@ -2,7 +2,12 @@
 import asyncio
 from fastapi import FastAPI
 from pyrogram import Client
-from config import API_ID, API_HASH, BOT_TOKEN
+from config import Config
+
+API_ID = Config.API_ID
+API_HASH = Config.API_HASH
+BOT_TOKEN = Config.BOT_TOKEN
+
 # FastAPI app
 app = FastAPI()
 
