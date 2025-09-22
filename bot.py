@@ -2,11 +2,12 @@ from config import Config
 from pyrogram import Client
 from handlers import *  # registers handlers
 
-app = Client(
-    "anon-bot",
-    bot_token=Config.BOT_TOKEN,
+pyro = Client(
+    "anon_chat_bot",
     api_id=Config.API_ID,
-    api_hash=Config.API_HASH
+    api_hash=Config.API_HASH,
+    bot_token=Config.BOT_TOKEN,
+    sleep_threshold=0  # <- add this
 )
 
 print("🚀 Bot starting...")
