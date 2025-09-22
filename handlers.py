@@ -1,8 +1,8 @@
 from pyrogram import Client, filters
 from pyrogram.types import Message
-from .db import get_user, users
-from .matching import enqueue, dequeue_pair
-from .utils import log_message
+from db import get_user, users
+from matching import enqueue, dequeue_pair
+from utils import log_message
 
 @Client.on_message(filters.command("start"))
 async def start_cmd(client, msg: Message):
