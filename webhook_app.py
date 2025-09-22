@@ -1,26 +1,19 @@
-from fastapi import FastAPI
 from pyrogram import Client
 from config import Config
+import asyncio
 
-app = FastAPI()
-pyro = Client(
+bot = Client(
     "anon_chat_bot",
     api_id=Config.API_ID,
     api_hash=Config.API_HASH,
     bot_token=Config.BOT_TOKEN,
 )
 
-# Lifespan event handler (replaces on_event)
-@app.on_event("startup")
-async def startup_event():
-    await pyro.start()
+async def main():
+    await bot.start()
     print("Bot started!")
+    # Keep the bot running forever
+    await asyncio.Event().wait()
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    await pyro.stop()
-    print("Bot stopped!")
-
-@app.get("/")
-async def root():
-    return {"status": "Bot is running"}
+if __name__ == "__main__":
+    asyncio.run(main())
