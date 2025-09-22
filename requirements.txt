@@ -1,3 +1,5 @@
 pyrogram==2.0.33
 tgcrypto
 motor
+fastapi
+uvicorn
