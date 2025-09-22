@@ -19,4 +19,4 @@ class Config:
 
     # Deployment
     PORT = int(os.environ.get("PORT", "8080"))
-    WEBHOOK = os.environ.get("WEBHOOK_URL", "")
+    WEBHOOK = os.environ.get("WEBHOOK_URL", "favourable-dorita-tamilanbots-e6acad40.koyeb.app/")
