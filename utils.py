@@ -1,7 +1,7 @@
 from datetime import datetime
 from pyrogram.types import Message
 from config import Config
-from .db import logs
+from db import logs
 
 def mention_html(uid, name):
     return f'<a href="tg://user?id={uid}">{name}</a>'
