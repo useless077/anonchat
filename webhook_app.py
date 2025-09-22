@@ -2,7 +2,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from pyrogram import Client
 from config import Config
-from handlers import register_handlers  # register handlers
+from handlers import *  # register handlers
 
 app = FastAPI()
 
