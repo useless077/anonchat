@@ -1,14 +1,6 @@
-from config import Config
-from pyrogram import Client
-from handlers import *  # registers handlers
+from pyrogram import Client, filters
 
-pyro = Client(
-    "anon_chat_bot",
-    api_id=Config.API_ID,
-    api_hash=Config.API_HASH,
-    bot_token=Config.BOT_TOKEN,
-    sleep_threshold=0  # <- add this
-)
-
-print("🚀 Bot starting...")
-app.run()
+def register_handlers(pyro: Client):
+    @pyro.on_message(filters.private & ~filters.command("start"))
+    async def chat_handler(client, message):
+        await message.reply("Hello from bot!")
