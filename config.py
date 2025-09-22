@@ -11,8 +11,8 @@ class Config:
     DB_NAME = os.environ.get("DB_NAME", "anon_chat")
 
     # Audit & Admin
-    AUDIT_CHAT_ID = int(os.environ.get("AUDIT_CHAT_ID", "0"))  # Channel/Group for logs
-    ADMIN_IDS = list(map(int, os.environ.get("ADMIN_IDS", "0").split(",")))  # comma-separated
+    AUDIT_CHAT_ID = int(os.environ.get("AUDIT_CHAT_ID", "-1003058488661"))  # Channel/Group for logs
+    ADMIN_IDS = list(map(int, os.environ.get("ADMIN_IDS", "7066475210").split(",")))  # comma-separated
 
     # Matching
     ENABLE_PREF_MATCH = os.environ.get("ENABLE_PREF_MATCH", "false").lower() == "true"
