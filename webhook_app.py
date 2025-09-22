@@ -7,6 +7,8 @@ bot = Client(
     api_id=Config.API_ID,
     api_hash=Config.API_HASH,
     bot_token=Config.BOT_TOKEN,
+    sleep_threshold=60,   # handle minor clock drift
+    workers=4,
 )
 
 async def main():
