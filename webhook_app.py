@@ -11,15 +11,12 @@ pyro = Client(
     api_id=Config.API_ID,
     api_hash=Config.API_HASH,
     bot_token=Config.BOT_TOKEN,
-    sleep_threshold=0  # <- add this
+    sleep_threshold=0
 )
 
 @app.on_event("startup")
 async def startup():
     await pyro.start()
-    # Set webhook
-    url = f"{Config.WEBHOOK}/webhook/{Config.BOT_TOKEN}"
-    await pyro.set_webhook(url)
 
 @app.on_event("shutdown")
 async def shutdown():
