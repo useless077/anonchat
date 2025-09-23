@@ -8,12 +8,11 @@ from database.users import Database
 from plugins.web_support import web_server  # your webserver module
 
 # Configure logging
-try:
-    logging.config.fileConfig('logging.conf')
-    logging.info("Logging configuration loaded successfully.")
-except Exception as e:
-    print(f"Error loading logging configuration: {e}")
-    logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logging.getLogger("pyrogram").setLevel(logging.ERROR)
 
 logging.getLogger().setLevel(logging.INFO)
 logging.getLogger("pyrogram").setLevel(logging.ERROR)
