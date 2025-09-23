@@ -1,105 +1,89 @@
 import logging
-import logging.config
 import sys
 from pyrogram import Client, filters
-from config import BOT_TOKEN, API_ID, API_HASH, PORT, MONGO_URI, MONGO_DB_NAME, LOG_CHANNEL
-from aiohttp import web
-from mongo.users_and_chats import Database
-from plugins.web_support import web_server
+from config import Config
+from database import Database
 
 # Configure logging
-try:
-    logging.config.fileConfig('logging.conf')
-    logging.info("Logging configuration loaded successfully.")
-except Exception as e:
-    print(f"Error loading logging configuration: {e}")
-    logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
 
-logging.getLogger().setLevel(logging.INFO)
-logging.getLogger("pyrogram").setLevel(logging.ERROR)
+# Initialize database
+db = Database(Config.MONGO_URI, Config.DB_NAME)
 
-class AnonChatBot(Client):
-    def __init__(self):
-        super().__init__(
-            name="AnonChatBot",
-            api_id=API_ID,
-            api_hash=API_HASH,
-            bot_token=BOT_TOKEN,
-            workers=50,
-            plugins={"root": "plugins"},
-            sleep_threshold=5,
-        )
-        self.database = Database(MONGO_URI, MONGO_DB_NAME)
+# Initialize Pyrogram bot
+bot = Client(
+    "anonchat-bot",
+    bot_token=Config.BOT_TOKEN,
+    api_id=Config.API_ID,
+    api_hash=Config.API_HASH,
+    workers=50,
+    sleep_threshold=5,
+)
 
-    async def start(self):
-        try:
-            await self.database.connect()
-            await super().start()
+# --- Bot Events --- #
 
-            me = await self.get_me()
-            self.mention = me.mention
-            self.username = me.username
+@bot.on_message(filters.private & filters.command("start"))
+async def start(client, message):
+    user_id = message.from_user.id
+    # Add user to DB
+    await db.add_user(user_id, {
+        "gender": "",
+        "age": None,
+        "location": "",
+        "dp": None
+    })
+    await message.reply_text("Welcome to Anonymous Chat Bot! Your profile is created.")
 
-            start_message = f"{me.first_name} ✅ Bot started successfully"
-            logging.info(start_message)
-            await self.send_message(LOG_CHANNEL, start_message)
+@bot.on_message(filters.private & filters.command("profile"))
+async def profile(client, message):
+    user_id = message.from_user.id
+    user = await db.get_user(user_id)
+    profile = user.get("profile", {})
+    text = f"Your Profile:\n\n"
+    text += f"Gender: {profile.get('gender', 'N/A')}\n"
+    text += f"Age: {profile.get('age', 'N/A')}\n"
+    text += f"Location: {profile.get('location', 'N/A')}\n"
+    await message.reply_text(text)
 
-            # Start web server for admin if needed
-            app = web.AppRunner(await web_server())
-            await app.setup()
-            await web.TCPSite(app, "0.0.0.0", PORT).start()
-            logging.info(f"Web server started on 0.0.0.0:{PORT}")
-
-        except Exception as e:
-            logging.error(f"Failed to start the bot: {e}")
-            try:
-                await self.send_message(LOG_CHANNEL, f"Failed to start: {e}")
-            except Exception as send_error:
-                logging.error(f"Failed to send error message: {send_error}")
-            sys.exit(1)
-
-    async def stop(self, *args):
-        try:
-            await self.database.close()
-            await super().stop()
-            logging.info("Bot Stopped 🙄")
-            await self.send_message(LOG_CHANNEL, "Bot Stopped 🙄")
-        except Exception as e:
-            logging.error(f"Failed to stop the bot: {e}")
-            try:
-                await self.send_message(LOG_CHANNEL, f"Failed to stop: {e}")
-            except Exception as send_error:
-                logging.error(f"Failed to send stop message: {send_error}")
-
-# ---- Command Handlers ----
-bot = AnonChatBot()
-
-@bot.on_message(filters.private & filters.text)
-async def save_user_profile(client, message):
-    """
-    Example: User sends "gender:male,age:25,location:Chennai"
-    """
+# Command to set profile
+@bot.on_message(filters.private & filters.command("setprofile"))
+async def set_profile(client, message):
+    user_id = message.from_user.id
+    # Format: /setprofile gender age location
     try:
-        user_id = str(message.from_user.id)
-        text = message.text.lower().replace(" ", "")
-        data = {}
-        for item in text.split(","):
-            key, value = item.split(":")
-            if key in ["gender", "age", "location"]:
-                data[key] = int(value) if key == "age" else value
-
-        # Save DP (profile photo)
-        photos = await client.get_profile_photos(user_id)
-        if photos.total_count > 0:
-            data["dp"] = photos.photos[0].file_id
-
-        await bot.database.add_user(user_id, data)
-        await message.reply("✅ Profile saved successfully!")
-        logging.info(f"User {user_id} profile saved: {data}")
+        _, gender, age, location = message.text.split(maxsplit=3)
+        profile = {
+            "gender": gender,
+            "age": int(age),
+            "location": location,
+            "dp": message.from_user.photo.file_id if message.from_user.photo else None
+        }
+        await db.add_user(user_id, profile)
+        await message.reply_text("Profile updated successfully!")
     except Exception as e:
-        await message.reply("❌ Failed to save profile.")
-        logging.error(f"Error saving user profile: {e}")
+        await message.reply_text("Usage: /setprofile gender age location")
+        logging.error(f"Error setting profile: {e}")
 
-# ---- Run bot ----
+# --- Startup / Shutdown --- #
+async def startup():
+    logging.info("Connecting to database...")
+    await db.connect()
+    logging.info("Database connected.")
+
+async def shutdown():
+    logging.info("Closing database...")
+    await db.close()
+    logging.info("Database closed.")
+
+# --- Run Bot --- #
 if __name__ == "__main__":
-    bot.run()
+    import asyncio
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(startup())
+    try:
+        bot.run()
+    finally:
+        loop.run_until_complete(shutdown())
