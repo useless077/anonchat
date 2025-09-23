@@ -1,11 +1,10 @@
-from pyrogram import Client
-from bot import start_bot
-from config import API_ID, API_HASH, BOT_TOKEN
+from flask import Flask
+app = Flask(__name__)
 
-app = Client("anonchat", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+@app.route('/')
+def hello_world():
+    return 'TamilBots'
 
-# Start the bot features
-start_bot(app)
 
-print("AnonChat Bot is running...")
-app.run()
+if __name__ == "__main__":
+    app.run()
