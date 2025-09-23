@@ -1,5 +1,5 @@
-pyrogram==2.0.33
-tgcrypto
-motor
-fastapi
-uvicorn
+pyrogram==2.0.106
+tgcrypto==1.2.5
+motor==3.3.2
+fastapi==0.110.0
+uvicorn[standard]==0.29.0
