@@ -1,36 +1,11 @@
-# app.py
-from fastapi import FastAPI
-from contextlib import asynccontextmanager
 from pyrogram import Client
-from config import Config
-from db import MongoStorage, sessions
-from bot import register_handlers
+from bot import start_bot
+from config import API_ID, API_HASH, BOT_TOKEN
 
-# Mongo storage for Pyrogram
-storage = MongoStorage(sessions)
+app = Client("anonchat", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-bot = Client(
-    "anon_chat_bot",
-    api_id=Config.API_ID,
-    api_hash=Config.API_HASH,
-    bot_token=Config.BOT_TOKEN,
-    storage=storage
-)
+# Start the bot features
+start_bot(app)
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    await bot.start()
-    print("Bot started")
-    register_handlers(bot)
-    try:
-        yield
-    finally:
-        await bot.stop()
-        await storage.close()
-        print("Bot stopped")
-
-app = FastAPI(lifespan=lifespan)
-
-@app.get("/")
-async def root():
-    return {"status": "Bot is alive"}
+print("AnonChat Bot is running...")
+app.run()
