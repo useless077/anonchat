@@ -51,4 +51,4 @@ if PORT <= 0:
     logging.error("PORT must be a positive integer")
     raise ValueError("PORT must be a positive integer")
 
-WEBHOOK = get_env_variable('WEBHOOK_URL', 'favourable-dorita-tamilanbots-e6acad40.koyeb.app/')
+WEBHOOK = get_env_variable('WEBHOOK_URL', 'https://anonchattamil.koyeb.app/')
