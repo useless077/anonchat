@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from pyrogram import Client
 from pyrogram import raw
 from config import Config
-from handlers import register_handlers  # or import needed handler functions
+from bot import register_handlers
 
 # Setup Telegram client
 bot = Client(
