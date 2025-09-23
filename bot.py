@@ -4,7 +4,7 @@ import sys
 from pyrogram import Client
 from aiohttp import web
 from config import API_ID, API_HASH, BOT_TOKEN, PORT, MONGO_URI, MONGO_DB_NAME, LOG_CHANNEL
-from database import Database
+from database.users import Database
 from plugins.web_support import web_server  # your webserver module
 
 # Configure logging
