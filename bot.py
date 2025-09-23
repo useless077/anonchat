@@ -1,6 +1,10 @@
-from pyrogram import Client, filters
+from pyrogram import filters
+from handlers import handle_start, handle_message
+from matching import add_user, get_partner
 
-def register_handlers(pyro: Client):
-    @pyro.on_message(filters.private & ~filters.command("start"))
-    async def chat_handler(client, message):
-        await message.reply("Hello from bot!")
+def start_bot(app):
+    # /start command
+    app.add_handler(filters.command("start"), handle_start)
+
+    # Message handler
+    app.add_handler(filters.text, handle_message)
