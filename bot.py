@@ -1,28 +1,27 @@
 import logging
 import logging.config
 import sys
-from pyrogram import Client
-from config import API_ID, API_HASH, BOT_TOKEN, PORT, MONGO_URI, MONGO_DB_NAME, LOG_CHANNEL
+from pyrogram import Client, filters
+from config import BOT_TOKEN, API_ID, API_HASH, PORT, MONGO_URI, MONGO_DB_NAME, LOG_CHANNEL
 from aiohttp import web
-from plugins.web_support import web_server
 from mongo.users_and_chats import Database
+from plugins.web_support import web_server
 
-# Configure logging with error handling
+# Configure logging
 try:
     logging.config.fileConfig('logging.conf')
     logging.info("Logging configuration loaded successfully.")
 except Exception as e:
     print(f"Error loading logging configuration: {e}")
-    logging.basicConfig(level=logging.INFO)  # Fallback to basic logging if config fails
+    logging.basicConfig(level=logging.INFO)
 
-# Set logging levels
 logging.getLogger().setLevel(logging.INFO)
 logging.getLogger("pyrogram").setLevel(logging.ERROR)
 
-class Bot(Client):
+class AnonChatBot(Client):
     def __init__(self):
         super().__init__(
-            name="Tamil-corobot",
+            name="AnonChatBot",
             api_id=API_ID,
             api_hash=API_HASH,
             bot_token=BOT_TOKEN,
@@ -34,60 +33,73 @@ class Bot(Client):
 
     async def start(self):
         try:
-            await self.database.connect()  # Ensure MongoDB connection is established
-            await self.database.initialize_database()  # Initialize the database if needed
-            await super().start()  # Start the bot
-            me = await self.get_me()  # Get bot information
-            self.mention = me.mention  # Store mention format
-            self.username = me.username  # Store username
+            await self.database.connect()
+            await super().start()
 
-            # Notify log channel about the bot restart
-            start_message = f"{me.first_name} ✅✅ BOT started successfully ✅✅"
-            logging.info(start_message)  # Log the bot start message
+            me = await self.get_me()
+            self.mention = me.mention
+            self.username = me.username
 
-            # Send message to LOG_CHANNEL after successful start
+            start_message = f"{me.first_name} ✅ Bot started successfully"
+            logging.info(start_message)
             await self.send_message(LOG_CHANNEL, start_message)
 
-            # Example usage of Database
-            await self.database.add_user("123", {"name": "John Doe"})
-            logging.info("User  added successfully: 123")
+            # Start web server for admin if needed
+            app = web.AppRunner(await web_server())
+            await app.setup()
+            await web.TCPSite(app, "0.0.0.0", PORT).start()
+            logging.info(f"Web server started on 0.0.0.0:{PORT}")
 
-            user = await self.database.get_user("123")
-            logging.info(f"Retrieved user: {user}")
-
-            await self.database.add_chat("456", {"title": "General Chat"})
-            logging.info("Chat added successfully: 456")
-
-            chat = await self.database.get_chat("456")
-            logging.info(f"Retrieved chat: {chat}")
-
-            app = web.AppRunner(await web_server())  # Initialize the web server
-            await app.setup()  # Set up the web server
-            bind_address = "0.0.0.0"  # Bind to all interfaces
-            await web.TCPSite(app, bind_address, PORT).start()  # Start the web server
-            logging.info(f"Web server started on {bind_address}:{PORT}")
         except Exception as e:
             logging.error(f"Failed to start the bot: {e}")
             try:
-                await self.send_message(LOG_CHANNEL, f"Failed to start the bot: {e}")
+                await self.send_message(LOG_CHANNEL, f"Failed to start: {e}")
             except Exception as send_error:
-                logging.error(f"Failed to send error message to log channel: {send_error}")
-            sys.exit(1)  # Exit if the bot fails to start
+                logging.error(f"Failed to send error message: {send_error}")
+            sys.exit(1)
 
     async def stop(self, *args):
         try:
-            await self.database.close()  # Close the MongoDB connection
-            await super().stop()  # Stop the bot
+            await self.database.close()
+            await super().stop()
             logging.info("Bot Stopped 🙄")
             await self.send_message(LOG_CHANNEL, "Bot Stopped 🙄")
         except Exception as e:
             logging.error(f"Failed to stop the bot: {e}")
             try:
-                await self.send_message(LOG_CHANNEL, f"Failed to stop the bot: {e}")
+                await self.send_message(LOG_CHANNEL, f"Failed to stop: {e}")
             except Exception as send_error:
-                logging.error(f"Failed to send stop message to log channel: {send_error}")
+                logging.error(f"Failed to send stop message: {send_error}")
 
-# Create an instance of the Bot and run it
+# ---- Command Handlers ----
+bot = AnonChatBot()
+
+@bot.on_message(filters.private & filters.text)
+async def save_user_profile(client, message):
+    """
+    Example: User sends "gender:male,age:25,location:Chennai"
+    """
+    try:
+        user_id = str(message.from_user.id)
+        text = message.text.lower().replace(" ", "")
+        data = {}
+        for item in text.split(","):
+            key, value = item.split(":")
+            if key in ["gender", "age", "location"]:
+                data[key] = int(value) if key == "age" else value
+
+        # Save DP (profile photo)
+        photos = await client.get_profile_photos(user_id)
+        if photos.total_count > 0:
+            data["dp"] = photos.photos[0].file_id
+
+        await bot.database.add_user(user_id, data)
+        await message.reply("✅ Profile saved successfully!")
+        logging.info(f"User {user_id} profile saved: {data}")
+    except Exception as e:
+        await message.reply("❌ Failed to save profile.")
+        logging.error(f"Error saving user profile: {e}")
+
+# ---- Run bot ----
 if __name__ == "__main__":
-    bot = Bot()
     bot.run()
