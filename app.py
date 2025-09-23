@@ -1,34 +1,27 @@
-# app.py (rename webhook_app or use this)
+# app.py
 import asyncio
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from pyrogram import Client
-from pyrogram import raw
+from pyrogram.storage.mongo_storage import MongoStorage
 from config import Config
-from bot import register_handlers
+from bot import register_handlers  # your chat handlers
 
-# Setup Telegram client
+# Use MongoDB for Pyrogram session storage
+storage = MongoStorage(Config.MONGO_URI, Config.DB_NAME, "sessions")
+
 bot = Client(
     "anon_chat_bot",
     api_id=Config.API_ID,
     api_hash=Config.API_HASH,
     bot_token=Config.BOT_TOKEN,
-    sleep_threshold=60,  # helps with small clock drift
+    storage=storage
 )
-
-async def sync_time(bot: Client):
-    try:
-        await bot.invoke(raw.functions.Help.GetConfig())
-        print("Time sync done")
-    except Exception as e:
-        print("Time sync failed:", e)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await bot.start()
-    print("Bot started")
-    await sync_time(bot)
-    # register handlers
+    print("Bot started with MongoDB session storage")
     register_handlers(bot)
     try:
         yield
@@ -41,6 +34,3 @@ app = FastAPI(lifespan=lifespan)
 @app.get("/")
 async def root():
     return {"status": "Bot is alive"}
-
-# If you have other webhook routes or health checks, define here
-# No need for if __name__ == "__main__" when deploying via Procfile or Docker
