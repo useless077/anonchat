@@ -1,7 +1,11 @@
-motor==3.1.1
-pymongo==4.3.3
-pyrogram==2.0.58
-tgcrypto
-fastapi
+pyrogram
+pyrofork==2.3.45
+motor>=3.0.0
+pymongo>=4.1
+python-dotenv>=0.20.0
+aiohttp>=3.8.0
+python-telegram-bot>=20.0a1
+schedule>=1.1.0
+TgCrypto
+flask
 uvicorn
-
