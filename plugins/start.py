@@ -64,7 +64,7 @@ async def start(client, message):
     ])
 
     await message.reply_photo(
-        photo="https://telegra.ph/file/abcdef12345678.jpg",  # AI-generated image placeholder
+        photo="https://graph.org/file/1e335a03940be708a9407.jpg",  # AI-generated image placeholder
         caption="👋 Welcome to Anonymous Chat Bot!\n\n🎉 Happy chatting!\n\nAvailable commands:\n/profile - Update your profile step by step\n/search - Find a partner to chat\n/next - Switch partner\n/end - End current chat",
         reply_markup=buttons
     )
