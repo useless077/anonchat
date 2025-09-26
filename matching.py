@@ -1,19 +1,25 @@
+# matching.py
 import random
-import asyncio
 from datetime import datetime, timedelta
+import asyncio
 
-active_users = set()  # Users available for pairing
+# Active users waiting for a partner
+active_users = set()  # user_id
+
+# Partner sessions
 sessions = {}  # user_id -> partner_id
-profile_timers = {}  # user_id -> timeout task
-chat_timers = {}  # user_id -> last activity timestamp
 
-IDLE_CHAT_LIMIT = 15 * 60  # 15 minutes
-PROFILE_TIMEOUT = 5 * 60  # 5 minutes
+# Timers
+profile_timers = {}  # user_id -> asyncio.Task
+chat_timers = {}     # user_id -> datetime of last message
 
+# Constants
+IDLE_CHAT_LIMIT = 15 * 60  # 15 min
+PROFILE_TIMEOUT = 5 * 60   # 5 min
 
+# ----------------- Add / Remove Users -----------------
 def add_user(user_id: int):
     active_users.add(user_id)
-
 
 def remove_user(user_id: int):
     active_users.discard(user_id)
@@ -26,8 +32,9 @@ def remove_user(user_id: int):
     if user_id in chat_timers:
         chat_timers.pop(user_id, None)
 
-
+# ----------------- Partner Matching -----------------
 def get_partner(user_id: int):
+    """Return existing partner or create a new one if available."""
     if user_id in sessions:
         return sessions[user_id]
 
@@ -42,30 +49,30 @@ def get_partner(user_id: int):
     chat_timers[partner] = datetime.utcnow()
     return partner
 
-
 def set_partner(user1: int, user2: int):
+    """Manually set partner for two users."""
     sessions[user1] = user2
     sessions[user2] = user1
     chat_timers[user1] = datetime.utcnow()
     chat_timers[user2] = datetime.utcnow()
 
-
+# ----------------- Profile Timer -----------------
 async def start_profile_timer(user_id: int, send_message):
-    """Wait for PROFILE_TIMEOUT seconds, then cancel profile update."""
+    """Start profile timer and cancel after timeout."""
     if user_id in profile_timers:
         profile_timers[user_id].cancel()
 
     async def timeout():
         await asyncio.sleep(PROFILE_TIMEOUT)
-        await send_message("⏳ Time expired! Please start updating your profile again.")
+        await send_message("⏳ Profile time expired! Please start again.")
         profile_timers.pop(user_id, None)
 
     task = asyncio.create_task(timeout())
     profile_timers[user_id] = task
 
-
+# ----------------- Idle Chat Checker -----------------
 async def check_idle_chats(send_message):
-    """Loop that checks for idle chats and disconnects after IDLE_CHAT_LIMIT seconds."""
+    """Loop to disconnect users after idle time."""
     while True:
         now = datetime.utcnow()
         to_remove = []
@@ -79,9 +86,9 @@ async def check_idle_chats(send_message):
                     to_remove.append(partner_id)
         for u in set(to_remove):
             remove_user(u)
-        await asyncio.sleep(60)  # Check every 1 min
+        await asyncio.sleep(60)
 
-
+# ----------------- Update Activity -----------------
 def update_activity(user_id: int):
     chat_timers[user_id] = datetime.utcnow()
     partner_id = sessions.get(user_id)
