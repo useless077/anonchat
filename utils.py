@@ -2,10 +2,7 @@
 from datetime import datetime
 from pyrogram.types import Message
 import config
-from database.users import Database
-
-# Initialize Database
-db = Database(mongo_uri=config.MONGO_URI, db_name=config.MONGO_DB_NAME)
+from database.users import db
 
 async def log_message(app, sender_id, sender_name, msg: Message):
     """
