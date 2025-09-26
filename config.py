@@ -46,7 +46,7 @@ ADMIN_IDS = list(map(int, get_env_variable('ADMIN_IDS', '7066475210').split(",")
 ENABLE_PREF_MATCH = get_env_variable('ENABLE_PREF_MATCH', 'false').lower() == "true"
 
 # Deployment
-PORT = int(get_env_variable('PORT', '8080'))
+PORT = int(get_env_variable('PORT', '8000'))
 if PORT <= 0:
     logging.error("PORT must be a positive integer")
     raise ValueError("PORT must be a positive integer")
