@@ -1,5 +1,6 @@
 # users.py
 from motor.motor_asyncio import AsyncIOMotorClient
+from config import MONGO_URI, MONGO_DB_NAME   # ✅ import config values
 
 class Database:
     def __init__(self, mongo_uri: str, db_name: str):
@@ -49,3 +50,7 @@ class Database:
     # Reset chat partner
     async def reset_partner(self, user_id: int):
         await self.users.update_one({"_id": user_id}, {"$set": {"partner_id": None}})
+
+
+# Create a single shared instance here 👇
+db = Database(MONGO_URI, MONGO_DB_NAME)
