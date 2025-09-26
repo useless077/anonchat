@@ -1,11 +1,10 @@
 # plugins/start.py
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from database.users import Database
+from database.users import db
 from matching import add_user, remove_user, get_partner
 from utils import log_message
 
-db = Database(uri="your-mongo-uri", db_name="your-db-name")  # Replace with config values
 
 async def start(client, message):
     user_id = message.from_user.id
