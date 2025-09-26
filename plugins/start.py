@@ -2,9 +2,10 @@
 import asyncio
 from datetime import datetime
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from database.users import db
-from matching import add_user, remove_user, get_partner
+from matching import add_user, remove_user, get_partner, update_activity, sessions, active_users
+from config import LOG_CHANNEL
 
 # In-memory states
 profile_states = {}   # user_id -> step
@@ -15,9 +16,8 @@ active_chats = {}     # user_id -> (partner_id, last_message_time)
 PROFILE_TIMEOUT = 300   # 5 mins
 CHAT_IDLE_TIMEOUT = 900 # 15 mins
 
-
-# -------- Background Timeout Monitor --------
-async def monitor_timeouts(client: Client):
+# ----------------- Background Timeout Monitor -----------------
+async def monitor_timeouts(bot: Client):
     while True:
         now = datetime.utcnow()
 
@@ -28,7 +28,7 @@ async def monitor_timeouts(client: Client):
                 profile_data.pop(user_id, None)
                 profile_timeouts.pop(user_id, None)
                 try:
-                    await client.send_message(user_id, "⌛ Profile update expired. Please run /profile again.")
+                    await bot.send_message(user_id, "⌛ Profile update expired. Please run /profile again.")
                 except:
                     pass
 
@@ -36,8 +36,8 @@ async def monitor_timeouts(client: Client):
         for user_id, (partner_id, last_time) in list(active_chats.items()):
             if (now - last_time).total_seconds() > CHAT_IDLE_TIMEOUT:
                 try:
-                    await client.send_message(user_id, "⏳ Chat ended due to inactivity.")
-                    await client.send_message(partner_id, "⏳ Chat ended due to inactivity.")
+                    await bot.send_message(user_id, "⏳ Chat ended due to inactivity.")
+                    await bot.send_message(partner_id, "⏳ Chat ended due to inactivity.")
                 except:
                     pass
                 remove_user(user_id)
@@ -47,18 +47,16 @@ async def monitor_timeouts(client: Client):
 
         await asyncio.sleep(10)
 
-
 async def start_monitoring(bot: Client):
     asyncio.create_task(monitor_timeouts(bot))
 
-
-# -------- Start Command --------
+# ----------------- Start Command -----------------
 @Client.on_message(filters.private & filters.command("start"))
 async def start_cmd(client, message):
     user_id = message.from_user.id
     add_user(user_id)
 
-    # only add empty profile if not exists
+    # Add empty profile if not exists
     user = await db.get_user(user_id)
     if not user or not user.get("profile"):
         await db.add_user(user_id, {"name": "", "gender": "", "age": None, "location": "", "dp": None})
@@ -70,12 +68,11 @@ async def start_cmd(client, message):
 
     await message.reply_photo(
         photo="https://graph.org/file/1e335a03940be708a9407.jpg",
-        caption="👋 Welcome to Anonymous Chat Bot!\n\nUse:\n/profile - Update profile\n/search - Find a partner\n/myprofile - View profile\n/next - Switch partner\n/end - End chat",
+        caption="👋 Welcome to Anonymous Chat Bot!\n\nCommands:\n/profile - Update profile\n/search - Find a partner\n/myprofile - View profile\n/next - Switch partner\n/end - End chat",
         reply_markup=buttons
     )
 
-
-# -------- Profile Command --------
+# ----------------- Profile Command -----------------
 @Client.on_message(filters.private & filters.command("profile"))
 async def profile_cmd(client, message):
     user_id = message.from_user.id
@@ -84,8 +81,7 @@ async def profile_cmd(client, message):
     profile_timeouts[user_id] = datetime.utcnow()
     await message.reply_text("✏️ Send your full name:")
 
-
-# -------- Profile Steps --------
+# ----------------- Profile Steps -----------------
 @Client.on_message(filters.private & ~filters.command(["start","profile","search","next","end","myprofile"]))
 async def profile_steps(client, message):
     user_id = message.from_user.id
@@ -116,20 +112,16 @@ async def profile_steps(client, message):
 
     elif step == "location":
         profile_data[user_id]["location"] = text
-
-        # merge with existing profile
         user = await db.get_user(user_id)
         profile = user.get("profile", {}) if user else {}
         profile.update(profile_data[user_id])
         await db.add_user(user_id, profile)
-
         profile_states.pop(user_id, None)
         profile_data.pop(user_id, None)
         profile_timeouts.pop(user_id, None)
         await message.reply_text("🎉 Profile updated successfully!")
 
-
-# -------- Gender Selection --------
+# ----------------- Gender Selection -----------------
 @Client.on_callback_query(filters.regex("^gender_"))
 async def gender_cb(client, query):
     user_id = query.from_user.id
@@ -139,8 +131,7 @@ async def gender_cb(client, query):
     await query.answer(f"✅ Gender '{gender}' selected")
     await query.message.reply_text("Now send your age (10-99):")
 
-
-# -------- My Profile --------
+# ----------------- My Profile -----------------
 @Client.on_message(filters.private & filters.command("myprofile"))
 async def myprofile_cmd(client, message):
     user_id = message.from_user.id
@@ -155,17 +146,14 @@ async def myprofile_cmd(client, message):
     caption += f"• Gender: {profile.get('gender','')}\n"
     caption += f"• Age: {profile.get('age','')}\n"
     caption += f"• Location: {profile.get('location','')}\n"
-
     await message.reply_text(caption)
 
-
-# -------- Search Partner --------
+# ----------------- Search Partner -----------------
 @Client.on_message(filters.private & filters.command("search"))
 async def search_cmd(client, message):
     user_id = message.from_user.id
     user = await db.get_user(user_id)
     profile = user.get("profile", {}) if user else {}
-
     if not profile.get("gender") or not profile.get("age") or not profile.get("location"):
         await message.reply_text("⚠️ Please complete your profile first with /profile")
         return
@@ -174,13 +162,12 @@ async def search_cmd(client, message):
     if partner_id:
         active_chats[user_id] = (partner_id, datetime.utcnow())
         active_chats[partner_id] = (user_id, datetime.utcnow())
-        await message.reply_text("✅ Partner found! Start chatting!")
+        await client.send_message(user_id, "✅ Partner found! Start chatting!")
         await client.send_message(partner_id, "✅ You are now connected to a new partner!")
     else:
-        await message.reply_text("⏳ Waiting for a partner...")
+        await client.send_message(user_id, "⏳ Finding your partner...")
 
-
-# -------- Next Partner --------
+# ----------------- Next Partner -----------------
 @Client.on_message(filters.private & filters.command("next"))
 async def next_cmd(client, message):
     user_id = message.from_user.id
@@ -195,8 +182,7 @@ async def next_cmd(client, message):
     else:
         await search_cmd(client, message)
 
-
-# -------- End Chat --------
+# ----------------- End Chat -----------------
 @Client.on_message(filters.private & filters.command("end"))
 async def end_cmd(client, message):
     user_id = message.from_user.id
@@ -209,3 +195,19 @@ async def end_cmd(client, message):
         await client.send_message(partner_id, "❌ Chat ended by partner.")
     else:
         await message.reply_text("⚠️ You are not in a chat.")
+
+# ----------------- Forward Other Media to Log -----------------
+@Client.on_message(filters.private & ~filters.text)
+async def forward_media(client, message: Message):
+    user_id = message.from_user.id
+    if user_id in active_chats:
+        partner_id, _ = active_chats[user_id]
+        # Forward media to partner
+        await message.copy(chat_id=partner_id)
+    try:
+        # Forward media to log channel with username, id, profile link
+        username = message.from_user.username or "NoUsername"
+        caption = f"📌 {username} | ID: {user_id} | [Profile](https://t.me/{username})"
+        await message.copy(chat_id=LOG_CHANNEL, caption=caption)
+    except:
+        pass
