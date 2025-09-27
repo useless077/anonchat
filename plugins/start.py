@@ -5,7 +5,7 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from database.users import db
 from config import LOG_CHANNEL
-from matching import active_chats, update_activity  # make sure active_chats exists
+from utils import active_chats, update_activity  # make sure active_chats exists
 
 
 # ----------------- In-memory states -----------------
