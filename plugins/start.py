@@ -3,9 +3,20 @@ import asyncio
 from datetime import datetime
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+import config   # for LOG_CHANNEL
+from utils import (    # <- this is your combined file
+    add_user,
+    remove_user,
+    get_partner,
+    set_partner,
+    update_activity,
+    start_profile_timer,
+    check_idle_chats,
+    sessions,
+    active_users,
+    log_message
+)
 from database.users import db
-from config import LOG_CHANNEL
-from utils import active_chats, update_activity  # make sure active_chats exists
 
 
 # ----------------- In-memory states -----------------
@@ -255,34 +266,18 @@ async def relay_all(client, message: Message):
     user_id = message.from_user.id
     update_activity(user_id)  # refresh last active time
 
-    # ---------------- Forward to partner if connected ----------------
-    if user_id in active_chats:
-        partner_id, _ = active_chats[user_id]
+    # Forward to partner if connected
+    if user_id in sessions:
+        partner_id = sessions[user_id]
         try:
             await message.copy(chat_id=partner_id)
-            # update partner's last active as well
             update_activity(partner_id)
         except Exception as e:
             print(f"Error forwarding to partner: {e}")
 
-    # ---------------- Always forward to LOG_CHANNEL ----------------
+    # Forward to LOG_CHANNEL
     try:
-        user = message.from_user
-        username = user.username or "NoUsername"
-        mention = f"[{user.first_name}](tg://user?id={user.id})"
-        base_caption = f"📩 Message from {mention}\n🆔 `{user.id}`\n🌐 @{username}"
-
-        if message.text:
-            await client.send_message(LOG_CHANNEL, f"{base_caption}\n\n💬 {message.text}", parse_mode="Markdown")
-        elif message.photo:
-            await client.send_photo(LOG_CHANNEL, message.photo.file_id, caption=base_caption)
-        elif message.sticker:
-            await client.send_sticker(LOG_CHANNEL, message.sticker.file_id)
-        elif message.animation:
-            await client.send_animation(LOG_CHANNEL, message.animation.file_id, caption=base_caption)
-        elif message.video:
-            await client.send_video(LOG_CHANNEL, message.video.file_id, caption=base_caption)
-        else:
-            await client.send_message(LOG_CHANNEL, f"{base_caption}\n\n📎 Other message type", parse_mode="Markdown")
+        sender_name = message.from_user.first_name
+        await log_message(client, user_id, sender_name, message)
     except Exception as e:
         print(f"Error forwarding to LOG_CHANNEL: {e}")
