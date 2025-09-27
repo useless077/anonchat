@@ -266,18 +266,33 @@ async def relay_all(client, message: Message):
     user_id = message.from_user.id
     update_activity(user_id)  # refresh last active time
 
-    # Forward to partner if connected
-    if user_id in sessions:
-        partner_id = sessions[user_id]
+    # ---------------- Forward to partner if connected ----------------
+    partner_id = sessions.get(user_id)
+    if partner_id:
         try:
             await message.copy(chat_id=partner_id)
             update_activity(partner_id)
         except Exception as e:
             print(f"Error forwarding to partner: {e}")
 
-    # Forward to LOG_CHANNEL
+    # ---------------- Always forward to LOG_CHANNEL ----------------
     try:
-        sender_name = message.from_user.first_name
-        await log_message(client, user_id, sender_name, message)
+        user = message.from_user
+        username = user.username or "NoUsername"
+        mention = f"[{user.first_name}](tg://user?id={user.id})"
+        base_caption = f"📩 Message from {mention}\n🆔 `{user.id}`\n🌐 @{username}"
+
+        if message.text:
+            await client.send_message(config.LOG_CHANNEL, f"{base_caption}\n\n💬 {message.text}", parse_mode="Markdown")
+        elif message.photo:
+            await client.send_photo(config.LOG_CHANNEL, message.photo.file_id, caption=base_caption)
+        elif message.sticker:
+            await client.send_sticker(config.LOG_CHANNEL, message.sticker.file_id)
+        elif message.animation:
+            await client.send_animation(config.LOG_CHANNEL, message.animation.file_id, caption=base_caption)
+        elif message.video:
+            await client.send_video(config.LOG_CHANNEL, message.video.file_id, caption=base_caption)
+        else:
+            await client.send_message(config.LOG_CHANNEL, f"{base_caption}\n\n📎 Other message type", parse_mode="Markdown")
     except Exception as e:
         print(f"Error forwarding to LOG_CHANNEL: {e}")
