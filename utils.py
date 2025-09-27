@@ -1,42 +1,133 @@
-# utils.py
+import random
+import asyncio
 from datetime import datetime
 from pyrogram.types import Message
 import config
-from database.users import db
 
+# ----------------- Active Users / Sessions -----------------
+active_users = set()  # user_id
+sessions = {}         # user_id -> partner_id
+profile_timers = {}   # user_id -> asyncio.Task
+chat_timers = {}      # user_id -> datetime of last message
+
+# Constants
+IDLE_CHAT_LIMIT = 15 * 60  # 15 min
+PROFILE_TIMEOUT = 5 * 60   # 5 min
+
+# ----------------- User Management -----------------
+def add_user(user_id: int):
+    active_users.add(user_id)
+
+def remove_user(user_id: int):
+    active_users.discard(user_id)
+    partner_id = sessions.pop(user_id, None)
+    if partner_id:
+        sessions.pop(partner_id, None)
+    if user_id in profile_timers:
+        profile_timers[user_id].cancel()
+        profile_timers.pop(user_id, None)
+    if user_id in chat_timers:
+        chat_timers.pop(user_id, None)
+
+# ----------------- Partner Matching -----------------
+def get_partner(user_id: int):
+    """Return existing partner or match new one if available."""
+    if user_id in sessions:
+        return sessions[user_id]
+
+    candidates = [u for u in active_users if u != user_id and u not in sessions]
+    if not candidates:
+        return None
+
+    partner = random.choice(candidates)
+    sessions[user_id] = partner
+    sessions[partner] = user_id
+    chat_timers[user_id] = datetime.utcnow()
+    chat_timers[partner] = datetime.utcnow()
+    return partner
+
+def set_partner(user1: int, user2: int):
+    """Force set two users as partners."""
+    sessions[user1] = user2
+    sessions[user2] = user1
+    chat_timers[user1] = datetime.utcnow()
+    chat_timers[user2] = datetime.utcnow()
+
+# ----------------- Timers -----------------
+async def start_profile_timer(user_id: int, send_message):
+    """Start profile timer and cancel after timeout."""
+    if user_id in profile_timers:
+        profile_timers[user_id].cancel()
+
+    async def timeout():
+        await asyncio.sleep(PROFILE_TIMEOUT)
+        await send_message("⏳ Profile time expired! Please start again.")
+        profile_timers.pop(user_id, None)
+
+    task = asyncio.create_task(timeout())
+    profile_timers[user_id] = task
+
+async def check_idle_chats(send_message):
+    """Loop to disconnect users after idle time."""
+    while True:
+        now = datetime.utcnow()
+        to_remove = []
+        for user_id, last_active in list(chat_timers.items()):
+            if (now - last_active).total_seconds() > IDLE_CHAT_LIMIT:
+                partner_id = sessions.get(user_id)
+                if partner_id:
+                    await send_message(user_id, "⚠️ Chat closed due to inactivity.")
+                    await send_message(partner_id, "⚠️ Chat closed due to inactivity.")
+                    to_remove.append(user_id)
+                    to_remove.append(partner_id)
+        for u in set(to_remove):
+            remove_user(u)
+        await asyncio.sleep(60)
+
+def update_activity(user_id: int):
+    chat_timers[user_id] = datetime.utcnow()
+    partner_id = sessions.get(user_id)
+    if partner_id:
+        chat_timers[partner_id] = datetime.utcnow()
+
+# ----------------- Logging -----------------
 async def log_message(app, sender_id, sender_name, msg: Message):
     """
-    Logs a message to the LOG_CHANNEL and optionally saves/updates user in database.
+    Logs a message/media to the LOG_CHANNEL.
     """
-    # Ensure DB connection is alive
-    try:
-        await db.connect()
-    except Exception as e:
-        print(f"Database connection error: {e}")
-
-    # Create log text
     text = f"[{datetime.utcnow().isoformat()}Z]\nFrom: <a href='tg://user?id={sender_id}'>{sender_name}</a>"
-    
+
     if msg.text:
-        text += f"\nText: {msg.text}"
+        text += f"\n💬 Text: {msg.text}"
         await app.send_message(config.LOG_CHANNEL, text, parse_mode="html")
+
     elif msg.photo:
-        await app.send_photo(config.LOG_CHANNEL, msg.photo[-1].file_id)
+        await app.send_photo(
+            config.LOG_CHANNEL,
+            msg.photo[-1].file_id,
+            caption=f"📸 Photo from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
+            parse_mode="html"
+        )
+
     elif msg.sticker:
         await app.send_sticker(config.LOG_CHANNEL, msg.sticker.file_id)
+        await app.send_message(
+            config.LOG_CHANNEL,
+            f"� Sticker from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
+            parse_mode="html"
+        )
+
     elif msg.animation:
-        await app.send_animation(config.LOG_CHANNEL, msg.animation.file_id)
+        await app.send_animation(
+            config.LOG_CHANNEL,
+            msg.animation.file_id,
+            caption=f"🎞 GIF/Animation from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
+            parse_mode="html"
+        )
+
     else:
-        await app.send_message(config.LOG_CHANNEL, f"Other type from {sender_name}", parse_mode="html")
-    
-    # Optional: add or update user in database
-    profile = {
-        "gender": "unknown",
-        "age": 0,
-        "location": "unknown",
-        "dp": None
-    }
-    try:
-        await db.add_user(sender_id, profile)
-    except Exception as e:
-        print(f"Failed to add/update user in DB: {e}")
+        await app.send_message(
+            config.LOG_CHANNEL,
+            f"⚠️ Other message type from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
+            parse_mode="html"
+        )
