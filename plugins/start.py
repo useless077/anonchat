@@ -149,23 +149,53 @@ async def myprofile_cmd(client, message):
     await message.reply_text(caption)
 
 # ----------------- Search Partner -----------------
+waiting_users = set()  # users waiting for match
+
 @Client.on_message(filters.private & filters.command("search"))
 async def search_cmd(client, message):
     user_id = message.from_user.id
     user = await db.get_user(user_id)
     profile = user.get("profile", {}) if user else {}
+
+    # Profile check
     if not profile.get("gender") or not profile.get("age") or not profile.get("location"):
         await message.reply_text("⚠️ Please complete your profile first with /profile")
         return
 
-    partner_id = get_partner(user_id)
-    if partner_id:
+    # If already in chat
+    if user_id in active_chats:
+        await message.reply_text("⚠️ You are already chatting. Use /end to leave chat.")
+        return
+
+    # If another waiting user exists → connect
+    if waiting_users:
+        partner_id = waiting_users.pop()
+        if partner_id == user_id:
+            return
+
+        # Create chat sessions
         active_chats[user_id] = (partner_id, datetime.utcnow())
         active_chats[partner_id] = (user_id, datetime.utcnow())
-        await client.send_message(user_id, "✅ Partner found! Start chatting!")
-        await client.send_message(partner_id, "✅ You are now connected to a new partner!")
+
+        # Fetch partner profile
+        partner = await db.get_user(partner_id)
+        p1 = partner.get("profile", {})
+        p2 = profile
+
+        # Send partner details
+        await client.send_message(
+            user_id,
+            f"✅ Partner found!\n\n👤 **Name:** {p1.get('name','')}\n⚧ **Gender:** {p1.get('gender','')}\n🎂 **Age:** {p1.get('age','')}\n📍 **Location:** {p1.get('location','')}"
+        )
+        await client.send_message(
+            partner_id,
+            f"✅ Partner found!\n\n👤 **Name:** {p2.get('name','')}\n⚧ **Gender:** {p2.get('gender','')}\n🎂 **Age:** {p2.get('age','')}\n📍 **Location:** {p2.get('location','')}"
+        )
     else:
-        await client.send_message(user_id, "⏳ Finding your partner...")
+        # No one waiting → add to queue
+        waiting_users.add(user_id)
+        await client.send_message(user_id, "⏳ Finding your partner... Please wait.")
+
 
 # ----------------- Next Partner -----------------
 @Client.on_message(filters.private & filters.command("next"))
