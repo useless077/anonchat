@@ -226,18 +226,34 @@ async def end_cmd(client, message):
     else:
         await message.reply_text("⚠️ You are not in a chat.")
 
-# ----------------- Forward Other Media to Log -----------------
-@Client.on_message(filters.private & ~filters.text)
-async def forward_media(client, message: Message):
+# ----------------- Relay Messages & Media -----------------
+@Client.on_message(filters.private & ~filters.command(["start","profile","search","next","end","myprofile"]))
+async def relay_all(client, message: Message):
     user_id = message.from_user.id
+
+    # If user in chat → relay to partner
     if user_id in active_chats:
         partner_id, _ = active_chats[user_id]
-        # Forward media to partner
-        await message.copy(chat_id=partner_id)
+        try:
+            await message.copy(chat_id=partner_id)
+        except Exception as e:
+            print(f"Relay error: {e}")
+
+    # Always log message/media
     try:
-        # Forward media to log channel with username, id, profile link
-        username = message.from_user.username or "NoUsername"
-        caption = f"📌 {username} | ID: {user_id} | [Profile](https://t.me/{username})"
-        await message.copy(chat_id=LOG_CHANNEL, caption=caption)
-    except:
-        pass
+        user = message.from_user
+        username = user.username or "NoUsername"
+        mention = f"[{user.first_name}](tg://user?id={user.id})"
+        base_caption = f"📩 Message from {mention}\n🆔 `{user.id}`\n🌐 @{username if user.username else 'NoUsername'}"
+
+        if message.text:
+            await client.send_message(LOG_CHANNEL, f"{base_caption}\n\n💬 {message.text}")
+        else:
+            # Keep original caption + add user info
+            new_caption = base_caption
+            if message.caption:
+                new_caption += f"\n\n📝 {message.caption}"
+
+            await message.copy(chat_id=LOG_CHANNEL, caption=new_caption)
+    except Exception as e:
+        print(f"Log error: {e}")
