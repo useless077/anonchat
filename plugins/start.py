@@ -10,6 +10,7 @@ from utils import (
     set_partner,
     update_activity,
     sessions,
+    start_profile_timer,
 )
 from database.users import db
 
@@ -46,9 +47,15 @@ async def profile_cmd(client, message):
     user_id = message.from_user.id
     profile_states[user_id] = "name"
     profile_data[user_id] = {}
-    profile_timeouts[user_id] = datetime.utcnow()
-    await message.reply_text("✏️ Send your full name:")
 
+    # Use the timer from utils.py
+    async def send_timeout(msg):
+        await client.send_message(user_id, msg)
+
+    await start_profile_timer(user_id, send_timeout)
+
+    await message.reply_text("✏️ Send your full name:")
+    
 @Client.on_callback_query(filters.regex("^gender_"))
 async def gender_cb(client, query):
     user_id = query.from_user.id
