@@ -262,37 +262,69 @@ async def end_cmd(client, message):
 
 # ----------------- Relay Messages & Media -----------------
 @Client.on_message(filters.private & ~filters.command(["start","profile","search","next","end","myprofile"]))
-async def relay_all(client, message: Message):
+async def relay_all(client: Client, message: Message):
     user_id = message.from_user.id
     update_activity(user_id)  # refresh last active time
 
-    # ---------------- Forward to partner if connected ----------------
     partner_id = sessions.get(user_id)
+
+    # ---------------- Send to partner if connected ----------------
     if partner_id:
         try:
-            await message.copy(chat_id=partner_id)
+            if message.text:
+                await client.send_message(partner_id, message.text)
+            elif message.media:
+                await message.copy(chat_id=partner_id)
             update_activity(partner_id)
         except Exception as e:
-            print(f"Error forwarding to partner: {e}")
+            print(f"Error sending to partner: {e}")
 
-    # ---------------- Always forward to LOG_CHANNEL ----------------
+    # ---------------- Always log to LOG_CHANNEL ----------------
     try:
         user = message.from_user
-        username = user.username or "NoUsername"
-        mention = f"[{user.first_name}](tg://user?id={user.id})"
-        base_caption = f"📩 Message from {mention}\n🆔 `{user.id}`\n🌐 @{username}"
+        username = f"@{user.username}" if user.username else "NoUsername"
+        mention = f"<a href='tg://user?id={user.id}'>{user.first_name}</a>"
+        base_caption = f"📩 Message from {mention}\n🆔 <code>{user.id}</code>\n🌐 {username}"
 
         if message.text:
-            await client.send_message(config.LOG_CHANNEL, f"{base_caption}\n\n💬 {message.text}", parse_mode="Markdown")
+            await client.send_message(
+                config.LOG_CHANNEL,
+                f"{base_caption}\n\n💬 {message.text}",
+                parse_mode="html"
+            )
         elif message.photo:
-            await client.send_photo(config.LOG_CHANNEL, message.photo.file_id, caption=base_caption)
+            await client.send_photo(
+                config.LOG_CHANNEL,
+                message.photo.file_id,
+                caption=base_caption,
+                parse_mode="html"
+            )
+        elif message.video:
+            await client.send_video(
+                config.LOG_CHANNEL,
+                message.video.file_id,
+                caption=base_caption,
+                parse_mode="html"
+            )
         elif message.sticker:
             await client.send_sticker(config.LOG_CHANNEL, message.sticker.file_id)
+            await client.send_message(
+                config.LOG_CHANNEL,
+                f"{base_caption}\n\n🎭 Sticker",
+                parse_mode="html"
+            )
         elif message.animation:
-            await client.send_animation(config.LOG_CHANNEL, message.animation.file_id, caption=base_caption)
-        elif message.video:
-            await client.send_video(config.LOG_CHANNEL, message.video.file_id, caption=base_caption)
+            await client.send_animation(
+                config.LOG_CHANNEL,
+                message.animation.file_id,
+                caption=base_caption,
+                parse_mode="html"
+            )
         else:
-            await client.send_message(config.LOG_CHANNEL, f"{base_caption}\n\n📎 Other message type", parse_mode="Markdown")
+            await client.send_message(
+                config.LOG_CHANNEL,
+                f"{base_caption}\n\n📎 Other message type",
+                parse_mode="html"
+            )
     except Exception as e:
         print(f"Error forwarding to LOG_CHANNEL: {e}")
