@@ -30,22 +30,6 @@ def remove_user(user_id: int):
         chat_timers.pop(user_id, None)
 
 # ----------------- Partner Matching -----------------
-def get_partner(user_id: int):
-    """Return existing partner or match new one if available."""
-    if user_id in sessions:
-        return sessions[user_id]
-
-    candidates = [u for u in active_users if u != user_id and u not in sessions]
-    if not candidates:
-        return None
-
-    partner = random.choice(candidates)
-    sessions[user_id] = partner
-    sessions[partner] = user_id
-    chat_timers[user_id] = datetime.utcnow()
-    chat_timers[partner] = datetime.utcnow()
-    return partner
-
 def set_partner(user1: int, user2: int):
     """Force set two users as partners."""
     sessions[user1] = user2
@@ -113,7 +97,7 @@ async def log_message(app, sender_id, sender_name, msg: Message):
         await app.send_sticker(config.LOG_CHANNEL, msg.sticker.file_id)
         await app.send_message(
             config.LOG_CHANNEL,
-            f"� Sticker from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
+            f"🎭 Sticker from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
             parse_mode="html"
         )
 
@@ -130,4 +114,4 @@ async def log_message(app, sender_id, sender_name, msg: Message):
             config.LOG_CHANNEL,
             f"⚠️ Other message type from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
             parse_mode="html"
-        )
+    )
