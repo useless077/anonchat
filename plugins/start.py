@@ -4,115 +4,21 @@ from datetime import datetime
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 import config   # for LOG_CHANNEL
-from utils import (    # <- this is your combined file
+from utils import (    
     add_user,
     remove_user,
-    get_partner,
     set_partner,
     update_activity,
-    start_profile_timer,
-    check_idle_chats,
     sessions,
-    active_users,
-    log_message
 )
 from database.users import db
 
-
-# ----------------- In-memory states -----------------
-profile_states = {}   # user_id -> step
-profile_data = {}     # user_id -> temporary dict
-profile_timeouts = {} # user_id -> datetime
-active_chats = {}     # user_id -> (partner_id, last_message_time)
-waiting_users = set() # users waiting for partner
-waiting_lock = asyncio.Lock()  # ensure safe access
-
-# ----------------- Constants -----------------
-PROFILE_TIMEOUT = 300   # 5 mins
-CHAT_IDLE_TIMEOUT = 900 # 15 mins
-
-# ----------------- Active Users -----------------
-active_users = set()   # user_id
-sessions = {}          # user_id -> partner_id
-
-# ----------------- Utility Functions -----------------
-def add_user(user_id: int):
-    active_users.add(user_id)
-
-def remove_user(user_id: int):
-    active_users.discard(user_id)
-    partner_id = sessions.pop(user_id, None)
-    if partner_id:
-        sessions.pop(partner_id, None)
-        active_chats.pop(partner_id, None)
-    active_chats.pop(user_id, None)
-    profile_states.pop(user_id, None)
-    profile_data.pop(user_id, None)
-    profile_timeouts.pop(user_id, None)
-
-def get_partner(user_id: int):
-    """Return partner if already exists or None."""
-    return sessions.get(user_id)
-
-def set_partner(user1: int, user2: int):
-    sessions[user1] = user2
-    sessions[user2] = user1
-    active_chats[user1] = (user2, datetime.utcnow())
-    active_chats[user2] = (user1, datetime.utcnow())
-
-def update_activity(user_id: int):
-    active_chats[user_id] = (active_chats[user_id][0], datetime.utcnow()) if user_id in active_chats else None
-    partner_id = sessions.get(user_id)
-    if partner_id:
-        active_chats[partner_id] = (active_chats[partner_id][0], datetime.utcnow())
-
-async def log_message(client, message: Message):
-    """Log any message/media to LOG_CHANNEL"""
-    try:
-        user = message.from_user
-        username = user.username or "NoUsername"
-        mention = f"[{user.first_name}](tg://user?id={user.id})"
-        base_caption = f"📩 Message from {mention}\n🆔 `{user.id}`\n🌐 @{username if user.username else 'NoUsername'}"
-
-        if message.text:
-            await client.send_message(LOG_CHANNEL, f"{base_caption}\n\n💬 {message.text}", parse_mode="Markdown")
-        else:
-            new_caption = base_caption
-            if message.caption:
-                new_caption += f"\n\n📝 {message.caption}"
-            await message.copy(chat_id=LOG_CHANNEL, caption=new_caption)
-    except Exception as e:
-        print(f"Log error: {e}")
-
-# ----------------- Timeout Monitor -----------------
-async def monitor_timeouts(bot: Client):
-    while True:
-        now = datetime.utcnow()
-
-        # Profile timeout
-        for user_id, start_time in list(profile_timeouts.items()):
-            if (now - start_time).total_seconds() > PROFILE_TIMEOUT:
-                profile_states.pop(user_id, None)
-                profile_data.pop(user_id, None)
-                profile_timeouts.pop(user_id, None)
-                try:
-                    await bot.send_message(user_id, "⌛ Profile update expired. Please run /profile again.")
-                except: pass
-
-        # Chat idle timeout
-        for user_id, (partner_id, last_time) in list(active_chats.items()):
-            if (now - last_time).total_seconds() > CHAT_IDLE_TIMEOUT:
-                try:
-                    await bot.send_message(user_id, "⏳ Chat ended due to inactivity.")
-                    await bot.send_message(partner_id, "⏳ Chat ended due to inactivity.")
-                except: pass
-                remove_user(user_id)
-                remove_user(partner_id)
-
-        await asyncio.sleep(10)
-
-async def start_monitoring(bot: Client):
-    asyncio.create_task(monitor_timeouts(bot))
+# state holders
+profile_states = {}
+profile_data = {}
+profile_timeouts = {}
+waiting_users = set()
+waiting_lock = asyncio.Lock()
 
 # ----------------- Commands -----------------
 @Client.on_message(filters.private & filters.command("start"))
@@ -134,6 +40,7 @@ async def start_cmd(client, message):
         reply_markup=buttons
     )
 
+# ----------------- Profile -----------------
 @Client.on_message(filters.private & filters.command("profile"))
 async def profile_cmd(client, message):
     user_id = message.from_user.id
@@ -209,12 +116,11 @@ async def search_cmd(client, message):
     if not profile.get("gender") or not profile.get("age") or not profile.get("location"):
         await message.reply_text("⚠️ Complete profile first with /profile")
         return
-    if user_id in active_chats:
+    if user_id in sessions:
         await message.reply_text("⚠️ You are already chatting. Use /end")
         return
 
     async with waiting_lock:
-        # If someone waiting → connect
         partner_id = None
         for uid in waiting_users:
             if uid != user_id:
@@ -222,7 +128,7 @@ async def search_cmd(client, message):
                 break
         if partner_id:
             waiting_users.discard(partner_id)
-            set_partner(user_id, partner_id)
+            set_partner(user_id, partner_id)  # updates sessions both sides
             # Send partner details
             p1 = (await db.get_user(partner_id)).get("profile", {})
             p2 = profile
@@ -236,27 +142,29 @@ async def search_cmd(client, message):
 @Client.on_message(filters.private & filters.command("next"))
 async def next_cmd(client, message):
     user_id = message.from_user.id
-    if user_id in active_chats:
-        partner_id, _ = active_chats.pop(user_id)
-        active_chats.pop(partner_id, None)
-        remove_user(user_id)
-        remove_user(partner_id)
-        await client.send_message(user_id, "🔄 Searching for next partner...")
-        await client.send_message(partner_id, "❌ Your partner left.")
-        await search_cmd(client, message)
+    if user_id in sessions:
+        partner_id = sessions.pop(user_id, None)
+        if partner_id:
+            sessions.pop(partner_id, None)
+            remove_user(user_id)
+            remove_user(partner_id)
+            await client.send_message(user_id, "🔄 Searching for next partner...")
+            await client.send_message(partner_id, "❌ Your partner left.")
+            await search_cmd(client, message)
     else:
         await search_cmd(client, message)
 
 @Client.on_message(filters.private & filters.command("end"))
 async def end_cmd(client, message):
     user_id = message.from_user.id
-    if user_id in active_chats:
-        partner_id, _ = active_chats.pop(user_id)
-        active_chats.pop(partner_id, None)
-        remove_user(user_id)
-        remove_user(partner_id)
-        await client.send_message(user_id, "❌ Chat ended.")
-        await client.send_message(partner_id, "❌ Chat ended by partner.")
+    if user_id in sessions:
+        partner_id = sessions.pop(user_id, None)
+        if partner_id:
+            sessions.pop(partner_id, None)
+            remove_user(user_id)
+            remove_user(partner_id)
+            await client.send_message(user_id, "❌ Chat ended.")
+            await client.send_message(partner_id, "❌ Chat ended by partner.")
     else:
         await message.reply_text("⚠️ You are not in a chat.")
 
@@ -264,11 +172,9 @@ async def end_cmd(client, message):
 @Client.on_message(filters.private & ~filters.command(["start","profile","search","next","end","myprofile"]))
 async def relay_all(client: Client, message: Message):
     user_id = message.from_user.id
-    update_activity(user_id)  # refresh last active time
+    update_activity(user_id)
 
     partner_id = sessions.get(user_id)
-
-    # ---------------- Send to partner if connected ----------------
     if partner_id:
         try:
             if message.text:
@@ -278,8 +184,10 @@ async def relay_all(client: Client, message: Message):
             update_activity(partner_id)
         except Exception as e:
             print(f"Error sending to partner: {e}")
+    else:
+        await message.reply_text("⚠️ You are not connected with a partner. Use /search to find one.")
 
-    # ---------------- Always log to LOG_CHANNEL ----------------
+    # Logging
     try:
         user = message.from_user
         username = f"@{user.username}" if user.username else "NoUsername"
@@ -287,44 +195,17 @@ async def relay_all(client: Client, message: Message):
         base_caption = f"📩 Message from {mention}\n🆔 <code>{user.id}</code>\n🌐 {username}"
 
         if message.text:
-            await client.send_message(
-                config.LOG_CHANNEL,
-                f"{base_caption}\n\n💬 {message.text}",
-                parse_mode="html"
-            )
+            await client.send_message(config.LOG_CHANNEL, f"{base_caption}\n\n💬 {message.text}", parse_mode="html")
         elif message.photo:
-            await client.send_photo(
-                config.LOG_CHANNEL,
-                message.photo.file_id,
-                caption=base_caption,
-                parse_mode="html"
-            )
+            await client.send_photo(config.LOG_CHANNEL, message.photo.file_id, caption=base_caption, parse_mode="html")
         elif message.video:
-            await client.send_video(
-                config.LOG_CHANNEL,
-                message.video.file_id,
-                caption=base_caption,
-                parse_mode="html"
-            )
+            await client.send_video(config.LOG_CHANNEL, message.video.file_id, caption=base_caption, parse_mode="html")
         elif message.sticker:
             await client.send_sticker(config.LOG_CHANNEL, message.sticker.file_id)
-            await client.send_message(
-                config.LOG_CHANNEL,
-                f"{base_caption}\n\n🎭 Sticker",
-                parse_mode="html"
-            )
+            await client.send_message(config.LOG_CHANNEL, f"{base_caption}\n\n🎭 Sticker", parse_mode="html")
         elif message.animation:
-            await client.send_animation(
-                config.LOG_CHANNEL,
-                message.animation.file_id,
-                caption=base_caption,
-                parse_mode="html"
-            )
+            await client.send_animation(config.LOG_CHANNEL, message.animation.file_id, caption=base_caption, parse_mode="html")
         else:
-            await client.send_message(
-                config.LOG_CHANNEL,
-                f"{base_caption}\n\n📎 Other message type",
-                parse_mode="html"
-            )
+            await client.send_message(config.LOG_CHANNEL, f"{base_caption}\n\n📎 Other message type", parse_mode="html")
     except Exception as e:
         print(f"Error forwarding to LOG_CHANNEL: {e}")
