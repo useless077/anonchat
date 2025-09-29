@@ -143,7 +143,9 @@ async def search_cmd(client, message):
     if not profile.get("gender") or not profile.get("age") or not profile.get("location"):
         await message.reply_text("⚠️ Complete profile first with /profile")
         return
-    if user_id in sessions:
+    
+    # ⚠️ FIX: Check partner_id from DB as well for safety
+    if user_id in sessions or user.get("partner_id"):
         await message.reply_text("⚠️ You are already chatting. Use /end")
         return
 
@@ -153,9 +155,15 @@ async def search_cmd(client, message):
             if uid != user_id:
                 partner_id = uid
                 break
+        
         if partner_id:
             waiting_users.discard(partner_id)
-            set_partner(user_id, partner_id)  # updates sessions both sides
+            
+            # ✅ FIX: Update both DB and Memory (sessions)
+            await db.set_partner(user_id, partner_id)
+            await db.set_partner(partner_id, user_id)
+            set_partner(user_id, partner_id)  # updates sessions in utils.py
+            
             # Send partner details
             p1 = (await db.get_user(partner_id)).get("profile", {})
             p2 = profile
@@ -196,6 +204,7 @@ async def end_cmd(client, message):
         await message.reply_text("⚠️ You are not in a chat.")
 
 # ----------------- Relay Messages & Media -----------------
+# plugins/start.py - relay_all function (Overwrite this)
 @Client.on_message(filters.private & ~filters.command(["start","profile","search","next","end","myprofile"]))
 async def relay_all(client: Client, message: Message):
     user_id = message.from_user.id
@@ -207,19 +216,30 @@ async def relay_all(client: Client, message: Message):
     # ------------------ 1. Partner Connection Check & Relay ------------------
     partner_id = sessions.get(user_id)
     
+    # ✅ FIX: Memory-யில் இல்லை என்றால், Database-ல் செக் செய் (Bot restart ஆன பின்)
+    if not partner_id:
+        user_db = await db.get_user(user_id)
+        partner_id = user_db.get("partner_id")
+        
+        # Database-ல் இருந்தால், sessions-ஐ மீண்டும் அப்டேட் செய்
+        if partner_id:
+            sessions[user_id] = partner_id
+
     if partner_id:
         update_activity(user_id) # Sender activity update
         
         try:
-            # ✅ FIX: message.copy() handles all types (Text, Photo, Video, Sticker, etc.)
+            # Relay the message (text or media) to the partner
             await message.copy(chat_id=partner_id)
             update_activity(partner_id) # Partner activity update
         except Exception as e:
             # Error handling if the partner blocked the bot
             print(f"Error sending to partner: {e}")
-            # If relay fails, end the chat and notify the user
+            
+            # If relay fails due to partner block/leaving, end the chat gracefully
             sessions.pop(user_id, None)
             sessions.pop(partner_id, None)
+            # ⚠️ Ensure db.reset_partner is called if available in utils.py/db instance
             await client.send_message(user_id, "❌ Your message could not be delivered. Your partner might have blocked the bot or left. Use /end.")
 
     else:
@@ -227,7 +247,6 @@ async def relay_all(client: Client, message: Message):
         await message.reply_text("⚠️ You are not connected with a partner. Use /search to find one.")
 
     # ------------------ 2. Logging (Log Channel-க்கு media/message அனுப்புதல்) ------------------
-    # NOTE: The logging logic is correct for sending media to the log channel.
     try:
         user = message.from_user
         username = f"@{user.username}" if user.username else "NoUsername"
