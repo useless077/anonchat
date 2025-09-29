@@ -69,8 +69,7 @@ async def gender_cb(client, query):
 async def profile_steps(client, message):
     user_id = message.from_user.id
     
-    # 💡 Logic: User profile setup-ல இல்லைனா, இந்த function-ல இருந்து வெளியேறி (return) 
-    # message-ஐ அடுத்த handler-க்கு (relay_all) அனுப்ப வேண்டும்.
+    # 💡 Logic: User profile setup-ல இல்லைனா, return செய்து message-ஐ அடுத்த handler-க்கு (relay_all) அனுப்ப வேண்டும்.
     if user_id not in profile_states: 
         return
         
@@ -201,32 +200,34 @@ async def end_cmd(client, message):
 async def relay_all(client: Client, message: Message):
     user_id = message.from_user.id
 
-    # 🛑 Crucial Check: If the message was consumed by profile_steps, stop here.
-    # This prevents profile steps from being forwarded as chat messages.
+    # 🛑 Crucial Check: If the user is in profile setup, STOP the message here.
     if user_id in profile_states:
         return
 
-    # ------------------ Partner Connection Check (உங்கள் suggestion) ------------------
-    # ⚠️ Neenga keta logic inga dhaan iruku.
+    # ------------------ 1. Partner Connection Check & Relay ------------------
     partner_id = sessions.get(user_id)
     
     if partner_id:
         update_activity(user_id) # Sender activity update
         
         try:
-            # Relay the message (text or media) to the partner
+            # ✅ FIX: message.copy() handles all types (Text, Photo, Video, Sticker, etc.)
             await message.copy(chat_id=partner_id)
             update_activity(partner_id) # Partner activity update
         except Exception as e:
             # Error handling if the partner blocked the bot
             print(f"Error sending to partner: {e}")
+            # If relay fails, end the chat and notify the user
+            sessions.pop(user_id, None)
+            sessions.pop(partner_id, None)
             await client.send_message(user_id, "❌ Your message could not be delivered. Your partner might have blocked the bot or left. Use /end.")
 
     else:
         # User not connected with a partner
         await message.reply_text("⚠️ You are not connected with a partner. Use /search to find one.")
 
-    # ------------------ Logging (Log Channel-க்கு media/message அனுப்புதல்) ------------------
+    # ------------------ 2. Logging (Log Channel-க்கு media/message அனுப்புதல்) ------------------
+    # NOTE: The logging logic is correct for sending media to the log channel.
     try:
         user = message.from_user
         username = f"@{user.username}" if user.username else "NoUsername"
