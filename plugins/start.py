@@ -69,22 +69,20 @@ async def gender_cb(client, query):
 async def profile_steps(client, message):
     user_id = message.from_user.id
     
-    # 💡 Logic: User profile setup-ல இல்லைனா, return செய்து message-ஐ அடுத்த handler-க்கு (relay_all) அனுப்ப வேண்டும்.
+    # If not in profile setup, let relay_all handle
     if user_id not in profile_states: 
         return
         
-    # Profile setup-ல் இருந்தால் மட்டுமே process ஆகும்
     profile_timeouts[user_id] = datetime.utcnow()
     step = profile_states[user_id]
     
-    # Profile setup-ன் போது media message வந்தால் reject செய்ய வேண்டும்
+    # Block media during profile setup
     if not message.text and step in ["name", "age", "location"]:
         await message.reply_text("❌ Please send only **text** input for your profile details (Name, Age, Location).")
         return
 
     text = message.text.strip()
     
-    # --- Profile Setup Steps ---
     if step == "name":
         profile_data[user_id]["name"] = text
         profile_states[user_id] = "gender"
@@ -110,14 +108,13 @@ async def profile_steps(client, message):
         profile.update(profile_data[user_id])
         await db.add_user(user_id, profile)
         
-        # Profile முடிந்தவுடன் state-களை clear செய்ய வேண்டும்
+        # Clear states
         profile_states.pop(user_id, None)
         profile_data.pop(user_id, None)
         profile_timeouts.pop(user_id, None)
         
         await message.reply_text("🎉 Profile updated successfully!")
     
-    # Message-ஐ profile setup process செய்த பிறகு, relay_all-க்கு அனுப்பக் கூடாது.
     return
 
 @Client.on_message(filters.private & filters.command("myprofile"))
@@ -144,7 +141,6 @@ async def search_cmd(client, message):
         await message.reply_text("⚠️ Complete profile first with /profile")
         return
     
-    # ⚠️ FIX: Check partner_id from DB as well for safety
     if user_id in sessions or user.get("partner_id"):
         await message.reply_text("⚠️ You are already chatting. Use /end")
         return
@@ -159,11 +155,13 @@ async def search_cmd(client, message):
         if partner_id:
             waiting_users.discard(partner_id)
             
-            # ✅ FIX: Update both DB and Memory (sessions)
             await db.set_partners_atomic(user_id, partner_id)
-
             set_partner(user_id, partner_id)
             set_partner(partner_id, user_id)
+
+            # Update statuses to busy
+            await db.update_status(user_id, "busy")
+            await db.update_status(partner_id, "busy")
             
             # Send partner details
             p1 = (await db.get_user(partner_id)).get("profile", {})
@@ -175,7 +173,6 @@ async def search_cmd(client, message):
             await message.reply_text("⏳ Finding your partner... Please wait.")
 
 # ----------------- Next / End -----------------
-# plugins/start.py - next_cmd function
 @Client.on_message(filters.private & filters.command("next"))
 async def next_cmd(client, message):
     user_id = message.from_user.id
@@ -184,8 +181,9 @@ async def next_cmd(client, message):
         if partner_id:
             sessions.pop(partner_id, None)
             
-            # ✅ FIX: DB-யையும் அப்டேட் செய்யவும்
             await db.reset_partners(user_id, partner_id)
+            await db.update_status(user_id, "idle")
+            await db.update_status(partner_id, "idle")
 
             remove_user(user_id)
             remove_user(partner_id)
@@ -195,24 +193,23 @@ async def next_cmd(client, message):
     else:
         await search_cmd(client, message)
 
-# plugins/start.py - end_cmd function
-@Client.on_message(filters.private & filters.command("end"))
-async def end_cmd(client, message):
+@Client.on_message(filters.command("end"))
+async def end_chat(client, message):
     user_id = message.from_user.id
-    if user_id in sessions:
-        partner_id = sessions.pop(user_id, None)
-        if partner_id:
-            sessions.pop(partner_id, None)
-            
-            # ✅ FIX: DB-யையும் அப்டேட் செய்யவும்
-            await db.reset_partners(user_id, partner_id)
-            
-            remove_user(user_id)
-            remove_user(partner_id)
-            await client.send_message(user_id, "❌ Chat ended.")
-            await client.send_message(partner_id, "❌ Chat ended by partner.")
+    user = await db.get_user(user_id)
+    partner_id = user.get("partner_id")
+
+    if partner_id:
+        await db.reset_partners(user_id, partner_id)
+        await db.update_status(user_id, "idle")
+        await db.update_status(partner_id, "idle")
+        waiting_users.discard(user_id)
+
+        await client.send_message(user_id, "❌ You disconnected from the chat.")
+        await client.send_message(partner_id, "❌ Your partner disconnected.")
     else:
-        await message.reply_text("⚠️ You are not in a chat.")
+        waiting_users.discard(user_id)
+        await client.send_message(user_id, "⚠️ You are not connected to anyone.")
 
 # ----------------- Relay Messages & Media -----------------
 @Client.on_message(filters.private & ~filters.command(
@@ -221,11 +218,9 @@ async def end_cmd(client, message):
 async def relay_all(client: Client, message: Message):
     user_id = message.from_user.id
 
-    # 🛑 Stop if user is in profile setup
     if user_id in profile_states:
         return
 
-    # ------------------ 1. Partner Connection Check ------------------
     partner_id = sessions.get(user_id)
     if not partner_id:
         user_db = await db.get_user(user_id)
@@ -243,6 +238,8 @@ async def relay_all(client: Client, message: Message):
             sessions.pop(user_id, None)
             sessions.pop(partner_id, None)
             await db.reset_partners(user_id, partner_id)
+            await db.update_status(user_id, "idle")
+            await db.update_status(partner_id, "idle")
             await client.send_message(
                 user_id,
                 "❌ Your message could not be delivered. "
@@ -253,7 +250,7 @@ async def relay_all(client: Client, message: Message):
         await message.reply_text("⚠️ You are not connected with a partner. Use /search to find one.")
         return
 
-    # ------------------ 2. Logging ------------------
+    # ------------------ Logging ------------------
     try:
         user = message.from_user
         username = f"@{user.username}" if user.username else "NoUsername"
