@@ -68,11 +68,24 @@ async def gender_cb(client, query):
 @Client.on_message(filters.private & ~filters.command(["start","profile","search","next","end","myprofile"]))
 async def profile_steps(client, message):
     user_id = message.from_user.id
-    if user_id not in profile_states: return
+    
+    # 💡 Logic: User profile setup-ல இல்லைனா, இந்த function-ல இருந்து வெளியேறி (return) 
+    # message-ஐ அடுத்த handler-க்கு (relay_all) அனுப்ப வேண்டும்.
+    if user_id not in profile_states: 
+        return
+        
+    # Profile setup-ல் இருந்தால் மட்டுமே process ஆகும்
     profile_timeouts[user_id] = datetime.utcnow()
     step = profile_states[user_id]
-    text = message.text.strip()
+    
+    # Profile setup-ன் போது media message வந்தால் reject செய்ய வேண்டும்
+    if not message.text and step in ["name", "age", "location"]:
+        await message.reply_text("❌ Please send only **text** input for your profile details (Name, Age, Location).")
+        return
 
+    text = message.text.strip()
+    
+    # --- Profile Setup Steps ---
     if step == "name":
         profile_data[user_id]["name"] = text
         profile_states[user_id] = "gender"
@@ -82,6 +95,7 @@ async def profile_steps(client, message):
             [InlineKeyboardButton("Shemale", callback_data="gender_shemale")]
         ])
         await message.reply_text("✅ Name saved. Choose gender:", reply_markup=buttons)
+    
     elif step == "age":
         if not text.isdigit() or not (10 <= int(text) <= 99):
             await message.reply_text("❌ Enter valid age (10-99)")
@@ -89,16 +103,23 @@ async def profile_steps(client, message):
         profile_data[user_id]["age"] = int(text)
         profile_states[user_id] = "location"
         await message.reply_text("✅ Age saved. Now send your location (city/country):")
+    
     elif step == "location":
         profile_data[user_id]["location"] = text
         user = await db.get_user(user_id)
         profile = user.get("profile", {}) if user else {}
         profile.update(profile_data[user_id])
         await db.add_user(user_id, profile)
+        
+        # Profile முடிந்தவுடன் state-களை clear செய்ய வேண்டும்
         profile_states.pop(user_id, None)
         profile_data.pop(user_id, None)
         profile_timeouts.pop(user_id, None)
+        
         await message.reply_text("🎉 Profile updated successfully!")
+    
+    # Message-ஐ profile setup process செய்த பிறகு, relay_all-க்கு அனுப்பக் கூடாது.
+    return
 
 @Client.on_message(filters.private & filters.command("myprofile"))
 async def myprofile_cmd(client, message):
@@ -179,28 +200,40 @@ async def end_cmd(client, message):
 @Client.on_message(filters.private & ~filters.command(["start","profile","search","next","end","myprofile"]))
 async def relay_all(client: Client, message: Message):
     user_id = message.from_user.id
-    update_activity(user_id)
 
+    # 🛑 Crucial Check: If the message was consumed by profile_steps, stop here.
+    # This prevents profile steps from being forwarded as chat messages.
+    if user_id in profile_states:
+        return
+
+    # ------------------ Partner Connection Check (உங்கள் suggestion) ------------------
+    # ⚠️ Neenga keta logic inga dhaan iruku.
     partner_id = sessions.get(user_id)
+    
     if partner_id:
+        update_activity(user_id) # Sender activity update
+        
         try:
-            if message.text:
-                await client.send_message(partner_id, message.text)
-            elif message.media:
-                await message.copy(chat_id=partner_id)
-            update_activity(partner_id)
+            # Relay the message (text or media) to the partner
+            await message.copy(chat_id=partner_id)
+            update_activity(partner_id) # Partner activity update
         except Exception as e:
+            # Error handling if the partner blocked the bot
             print(f"Error sending to partner: {e}")
+            await client.send_message(user_id, "❌ Your message could not be delivered. Your partner might have blocked the bot or left. Use /end.")
+
     else:
+        # User not connected with a partner
         await message.reply_text("⚠️ You are not connected with a partner. Use /search to find one.")
 
-    # Logging
+    # ------------------ Logging (Log Channel-க்கு media/message அனுப்புதல்) ------------------
     try:
         user = message.from_user
         username = f"@{user.username}" if user.username else "NoUsername"
         mention = f"<a href='tg://user?id={user.id}'>{user.first_name}</a>"
         base_caption = f"📩 Message from {mention}\n🆔 <code>{user.id}</code>\n🌐 {username}"
 
+        # Logging all types of messages to the LOG_CHANNEL
         if message.text:
             await client.send_message(config.LOG_CHANNEL, f"{base_caption}\n\n💬 {message.text}", parse_mode="html")
         elif message.photo:
