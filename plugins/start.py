@@ -174,6 +174,7 @@ async def search_cmd(client, message):
             await message.reply_text("⏳ Finding your partner... Please wait.")
 
 # ----------------- Next / End -----------------
+# plugins/start.py - next_cmd function
 @Client.on_message(filters.private & filters.command("next"))
 async def next_cmd(client, message):
     user_id = message.from_user.id
@@ -181,6 +182,11 @@ async def next_cmd(client, message):
         partner_id = sessions.pop(user_id, None)
         if partner_id:
             sessions.pop(partner_id, None)
+            
+            # ✅ FIX: DB-யையும் அப்டேட் செய்யவும்
+            await db.reset_partner(user_id)
+            await db.reset_partner(partner_id)
+
             remove_user(user_id)
             remove_user(partner_id)
             await client.send_message(user_id, "🔄 Searching for next partner...")
@@ -189,6 +195,7 @@ async def next_cmd(client, message):
     else:
         await search_cmd(client, message)
 
+# plugins/start.py - end_cmd function
 @Client.on_message(filters.private & filters.command("end"))
 async def end_cmd(client, message):
     user_id = message.from_user.id
@@ -196,6 +203,11 @@ async def end_cmd(client, message):
         partner_id = sessions.pop(user_id, None)
         if partner_id:
             sessions.pop(partner_id, None)
+            
+            # ✅ FIX: DB-யையும் அப்டேட் செய்யவும்
+            await db.reset_partner(user_id)
+            await db.reset_partner(partner_id)
+            
             remove_user(user_id)
             remove_user(partner_id)
             await client.send_message(user_id, "❌ Chat ended.")
