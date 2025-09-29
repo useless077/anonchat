@@ -93,6 +93,24 @@ async def log_message(app, sender_id, sender_name, msg: Message):
             parse_mode="html"
         )
 
+    # ✅ ADDED: Explicitly handle Video
+    elif msg.video:
+        await app.send_video(
+            config.LOG_CHANNEL,
+            msg.video.file_id,
+            caption=f"🎥 Video from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
+            parse_mode="html"
+        )
+        
+    # ✅ ADDED: Explicitly handle Document (Generic File)
+    elif msg.document:
+        await app.send_document(
+            config.LOG_CHANNEL,
+            msg.document.file_id,
+            caption=f"📎 Document from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
+            parse_mode="html"
+        )
+
     elif msg.sticker:
         await app.send_sticker(config.LOG_CHANNEL, msg.sticker.file_id)
         await app.send_message(
@@ -112,6 +130,6 @@ async def log_message(app, sender_id, sender_name, msg: Message):
     else:
         await app.send_message(
             config.LOG_CHANNEL,
-            f"⚠️ Other message type from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
+            f"⚠️ Unhandled message type from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
             parse_mode="html"
-    )
+        )
