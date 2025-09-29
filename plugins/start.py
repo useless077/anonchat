@@ -181,7 +181,7 @@ async def next_cmd(client, message):
         if partner_id:
             sessions.pop(partner_id, None)
             
-            await db.reset_partners(user_id, partner_id)
+            await db.reset_partner(user_id, partner_id)
             await db.update_status(user_id, "idle")
             await db.update_status(partner_id, "idle")
 
@@ -200,7 +200,7 @@ async def end_chat(client, message):
     partner_id = user.get("partner_id")
 
     if partner_id:
-        await db.reset_partners(user_id, partner_id)
+        await db.reset_partner(user_id, partner_id)
         await db.update_status(user_id, "idle")
         await db.update_status(partner_id, "idle")
         waiting_users.discard(user_id)
