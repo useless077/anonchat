@@ -160,9 +160,10 @@ async def search_cmd(client, message):
             waiting_users.discard(partner_id)
             
             # ✅ FIX: Update both DB and Memory (sessions)
-            await db.set_partner(user_id, partner_id)
-            await db.set_partner(partner_id, user_id)
-            set_partner(user_id, partner_id)  # updates sessions in utils.py
+            await db.set_partners_atomic(user_id, partner_id)
+
+            set_partner(user_id, partner_id)
+            set_partner(partner_id, user_id)
             
             # Send partner details
             p1 = (await db.get_user(partner_id)).get("profile", {})
@@ -184,8 +185,7 @@ async def next_cmd(client, message):
             sessions.pop(partner_id, None)
             
             # ✅ FIX: DB-யையும் அப்டேட் செய்யவும்
-            await db.reset_partner(user_id)
-            await db.reset_partner(partner_id)
+            await db.reset_partners(user_id, partner_id)
 
             remove_user(user_id)
             remove_user(partner_id)
@@ -205,8 +205,7 @@ async def end_cmd(client, message):
             sessions.pop(partner_id, None)
             
             # ✅ FIX: DB-யையும் அப்டேட் செய்யவும்
-            await db.reset_partner(user_id)
-            await db.reset_partner(partner_id)
+            await db.reset_partners(user_id, partner_id)
             
             remove_user(user_id)
             remove_user(partner_id)
@@ -216,68 +215,95 @@ async def end_cmd(client, message):
         await message.reply_text("⚠️ You are not in a chat.")
 
 # ----------------- Relay Messages & Media -----------------
-# plugins/start.py - relay_all function (Overwrite this)
-@Client.on_message(filters.private & ~filters.command(["start","profile","search","next","end","myprofile"]))
+@Client.on_message(filters.private & ~filters.command(
+    ["start","profile","search","next","end","myprofile"]
+))
 async def relay_all(client: Client, message: Message):
     user_id = message.from_user.id
 
-    # 🛑 Crucial Check: If the user is in profile setup, STOP the message here.
+    # 🛑 Stop if user is in profile setup
     if user_id in profile_states:
         return
 
-    # ------------------ 1. Partner Connection Check & Relay ------------------
+    # ------------------ 1. Partner Connection Check ------------------
     partner_id = sessions.get(user_id)
-    
-    # ✅ FIX: Memory-யில் இல்லை என்றால், Database-ல் செக் செய் (Bot restart ஆன பின்)
     if not partner_id:
         user_db = await db.get_user(user_id)
-        partner_id = user_db.get("partner_id")
-        
-        # Database-ல் இருந்தால், sessions-ஐ மீண்டும் அப்டேட் செய்
+        partner_id = user_db.get("partner_id") if user_db else None
         if partner_id:
             sessions[user_id] = partner_id
 
     if partner_id:
-        update_activity(user_id) # Sender activity update
-        
+        update_activity(user_id)
         try:
-            # Relay the message (text or media) to the partner
             await message.copy(chat_id=partner_id)
-            update_activity(partner_id) # Partner activity update
+            update_activity(partner_id)
         except Exception as e:
-            # Error handling if the partner blocked the bot
             print(f"Error sending to partner: {e}")
-            
-            # If relay fails due to partner block/leaving, end the chat gracefully
             sessions.pop(user_id, None)
             sessions.pop(partner_id, None)
-            # ⚠️ Ensure db.reset_partner is called if available in utils.py/db instance
-            await client.send_message(user_id, "❌ Your message could not be delivered. Your partner might have blocked the bot or left. Use /end.")
-
+            await db.reset_partners(user_id, partner_id)
+            await client.send_message(
+                user_id,
+                "❌ Your message could not be delivered. "
+                "Your partner might have blocked the bot or left. Use /end."
+            )
+            return
     else:
-        # User not connected with a partner
         await message.reply_text("⚠️ You are not connected with a partner. Use /search to find one.")
+        return
 
-    # ------------------ 2. Logging (Log Channel-க்கு media/message அனுப்புதல்) ------------------
+    # ------------------ 2. Logging ------------------
     try:
         user = message.from_user
         username = f"@{user.username}" if user.username else "NoUsername"
         mention = f"<a href='tg://user?id={user.id}'>{user.first_name}</a>"
-        base_caption = f"📩 Message from {mention}\n🆔 <code>{user.id}</code>\n🌐 {username}"
+        base_caption = (
+            f"📩 Message from {mention}\n"
+            f"🆔 <code>{user.id}</code>\n"
+            f"🌐 {username}"
+        )
 
-        # Logging all types of messages to the LOG_CHANNEL
         if message.text:
-            await client.send_message(config.LOG_CHANNEL, f"{base_caption}\n\n💬 {message.text}", parse_mode="html")
+            await client.send_message(
+                config.LOG_CHANNEL,
+                f"{base_caption}\n\n💬 {message.text}",
+                parse_mode="html"
+            )
         elif message.photo:
-            await client.send_photo(config.LOG_CHANNEL, message.photo.file_id, caption=base_caption, parse_mode="html")
+            await client.send_photo(
+                config.LOG_CHANNEL,
+                message.photo.file_id,
+                caption=base_caption,
+                parse_mode="html"
+            )
         elif message.video:
-            await client.send_video(config.LOG_CHANNEL, message.video.file_id, caption=base_caption, parse_mode="html")
+            await client.send_video(
+                config.LOG_CHANNEL,
+                message.video.file_id,
+                caption=base_caption,
+                parse_mode="html"
+            )
         elif message.sticker:
             await client.send_sticker(config.LOG_CHANNEL, message.sticker.file_id)
-            await client.send_message(config.LOG_CHANNEL, f"{base_caption}\n\n🎭 Sticker", parse_mode="html")
+            await client.send_message(
+                config.LOG_CHANNEL,
+                f"{base_caption}\n\n🎭 Sticker",
+                parse_mode="html"
+            )
         elif message.animation:
-            await client.send_animation(config.LOG_CHANNEL, message.animation.file_id, caption=base_caption, parse_mode="html")
+            await client.send_animation(
+                config.LOG_CHANNEL,
+                message.animation.file_id,
+                caption=base_caption,
+                parse_mode="html"
+            )
         else:
-            await client.send_message(config.LOG_CHANNEL, f"{base_caption}\n\n📎 Other message type", parse_mode="html")
+            await client.send_message(
+                config.LOG_CHANNEL,
+                f"{base_caption}\n\n📎 Other message type",
+                parse_mode="html"
+            )
+
     except Exception as e:
         print(f"Error forwarding to LOG_CHANNEL: {e}")
