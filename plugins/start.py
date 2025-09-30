@@ -217,8 +217,10 @@ async def end_chat(client, message):
 ))
 async def relay_all(client: Client, message: Message):
     user_id = message.from_user.id
+    print(f"[relay_all] Message from user {user_id}")
 
     if user_id in profile_states:
+        print(f"[relay_all] User {user_id} in profile setup, skipping relay")
         return
 
     partner_id = sessions.get(user_id)
@@ -227,6 +229,10 @@ async def relay_all(client: Client, message: Message):
         partner_id = user_db.get("partner_id") if user_db else None
         if partner_id:
             sessions[user_id] = partner_id
+            print(f"[relay_all] Loaded partner_id {partner_id} from DB for user {user_id}")
+
+    print(f"[relay_all] user_id={user_id}, partner_id={partner_id}")
+    print(f"[relay_all] sessions: {sessions}")
 
     if partner_id:
         update_activity(user_id)
@@ -234,7 +240,7 @@ async def relay_all(client: Client, message: Message):
             await message.copy(chat_id=partner_id)
             update_activity(partner_id)
         except Exception as e:
-            print(f"Error sending to partner: {e}")
+            print(f"[relay_all] Error sending to partner: {e}")
             sessions.pop(user_id, None)
             sessions.pop(partner_id, None)
             await db.reset_partners(user_id, partner_id)
