@@ -212,9 +212,7 @@ async def end_chat(client, message):
         await client.send_message(user_id, "⚠️ You are not connected to anyone.")
 
 # ----------------- Relay Messages & Media -----------------
-@Client.on_message(filters.private & ~filters.command(
-    ["start","profile","search","next","end","myprofile"]
-))
+@Client.on_message(filters.private & filters.incoming & ~filters.command(""))
 async def relay_all(client: Client, message: Message):
     user_id = message.from_user.id
     print(f"[relay_all] Message from user {user_id}")
