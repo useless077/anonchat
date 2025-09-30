@@ -11,8 +11,10 @@ from utils import (
     update_activity,
     sessions,
     start_profile_timer,
+    log_message,
 )
 from database.users import db
+
 
 # state holders
 profile_states = {}
@@ -155,158 +157,136 @@ async def search_cmd(client, message):
         if partner_id:
             waiting_users.discard(partner_id)
             
+            # Update DB + sessions
             await db.set_partners_atomic(user_id, partner_id)
             set_partner(user_id, partner_id)
-            set_partner(partner_id, user_id)
 
-            # Update statuses to busy
             await db.update_status(user_id, "busy")
             await db.update_status(partner_id, "busy")
             
             # Send partner details
             p1 = (await db.get_user(partner_id)).get("profile", {})
             p2 = profile
-            await client.send_message(user_id, f"✅ Partner found!\n👤 Name: {p1.get('name','')}\n⚧ Gender: {p1.get('gender','')}\n🎂 Age: {p1.get('age','')}\n📍 Location: {p1.get('location','')}")
-            await client.send_message(partner_id, f"✅ Partner found!\n👤 Name: {p2.get('name','')}\n⚧ Gender: {p2.get('gender','')}\n🎂 Age: {p2.get('age','')}\n📍 Location: {p2.get('location','')}")
+            await client.send_message(
+                user_id,
+                f"✅ Partner found!\n👤 Name: {p1.get('name','')}\n⚧ Gender: {p1.get('gender','')}\n🎂 Age: {p1.get('age','')}\n📍 Location: {p1.get('location','')}"
+            )
+            await client.send_message(
+                partner_id,
+                f"✅ Partner found!\n👤 Name: {p2.get('name','')}\n⚧ Gender: {p2.get('gender','')}\n🎂 Age: {p2.get('age','')}\n📍 Location: {p2.get('location','')}"
+            )
         else:
             waiting_users.add(user_id)
             await message.reply_text("⏳ Finding your partner... Please wait.")
+
 
 # ----------------- Next / End -----------------
 @Client.on_message(filters.private & filters.command("next"))
 async def next_cmd(client, message):
     user_id = message.from_user.id
-    if user_id in sessions:
-        partner_id = sessions.pop(user_id, None)
-        if partner_id:
-            sessions.pop(partner_id, None)
-            
-            await db.reset_partners(user_id, partner_id)
-            await db.update_status(user_id, "idle")
-            await db.update_status(partner_id, "idle")
+    partner_id = sessions.pop(user_id, None)
 
-            remove_user(user_id)
-            remove_user(partner_id)
-            await client.send_message(user_id, "🔄 Searching for next partner...")
-            await client.send_message(partner_id, "❌ Your partner left.")
-            await search_cmd(client, message)
+    if partner_id:
+        sessions.pop(partner_id, None)
+
+        # Reset both partners in DB
+        await db.reset_partners(user_id, partner_id)
+        await db.update_status(user_id, "idle")
+        await db.update_status(partner_id, "idle")
+
+        # Make sure both removed from waiting list
+        waiting_users.discard(user_id)
+        waiting_users.discard(partner_id)
+
+        # Remove from memory sessions
+        remove_user(user_id)
+        remove_user(partner_id)
+
+        # Notify both users
+        await client.send_message(user_id, "🔄 Searching for next partner...")
+        await client.send_message(partner_id, "❌ Your partner left.")
+
+        # Start new search immediately for the one who clicked /next
+        await search_cmd(client, message)
     else:
         await search_cmd(client, message)
 
-@Client.on_message(filters.command("end"))
+
+@Client.on_message(filters.private & filters.command("end"))
 async def end_chat(client, message):
     user_id = message.from_user.id
     user = await db.get_user(user_id)
     partner_id = user.get("partner_id")
 
     if partner_id:
+        # Reset DB
         await db.reset_partners(user_id, partner_id)
         await db.update_status(user_id, "idle")
         await db.update_status(partner_id, "idle")
-        waiting_users.discard(user_id)
 
+        # Clear sessions + waiting list
+        sessions.pop(user_id, None)
+        sessions.pop(partner_id, None)
+        waiting_users.discard(user_id)
+        waiting_users.discard(partner_id)
+
+        # Notify both
         await client.send_message(user_id, "❌ You disconnected from the chat.")
         await client.send_message(partner_id, "❌ Your partner disconnected.")
     else:
+        # Make sure user is not left in waiting queue
         waiting_users.discard(user_id)
+        sessions.pop(user_id, None)
+        await db.update_status(user_id, "idle")
+
         await client.send_message(user_id, "⚠️ You are not connected to anyone.")
 
+
 # ----------------- Relay Messages & Media -----------------
-@Client.on_message(filters.private & filters.incoming & ~filters.command(""))
+
+@Client.on_message(filters.private & filters.incoming & ~filters.command(["start","profile","search","next","end","myprofile"]))
 async def relay_all(client: Client, message: Message):
     user_id = message.from_user.id
-    print(f"[relay_all] Message from user {user_id}")
+    print(f"[relay_all] Message from {user_id}")
 
+    # Skip if user is in profile setup
     if user_id in profile_states:
-        print(f"[relay_all] User {user_id} in profile setup, skipping relay")
+        print(f"[relay_all] {user_id} still in profile setup, skipping")
         return
 
+    # Find partner (check sessions first, then DB fallback)
     partner_id = sessions.get(user_id)
     if not partner_id:
         user_db = await db.get_user(user_id)
         partner_id = user_db.get("partner_id") if user_db else None
         if partner_id:
             sessions[user_id] = partner_id
-            print(f"[relay_all] Loaded partner_id {partner_id} from DB for user {user_id}")
+            sessions[partner_id] = user_id  # make sure reverse link exists
+            print(f"[relay_all] Partner {partner_id} loaded from DB for {user_id}")
 
-    print(f"[relay_all] sessions: {sessions}")
-    print(f"[relay_all] user_id={user_id}, partner_id={partner_id}")
-
-    if partner_id:
-        update_activity(user_id)
-        try:
-            await message.copy(chat_id=partner_id)
-            update_activity(partner_id)
-            print(f"[relay_all] Message relayed from {user_id} to {partner_id}")
-        except Exception as e:
-            print(f"[relay_all] Error sending to partner: {e}")
-            sessions.pop(user_id, None)
-            sessions.pop(partner_id, None)
-            await db.reset_partners(user_id, partner_id)
-            await db.update_status(user_id, "idle")
-            await db.update_status(partner_id, "idle")
-            await client.send_message(
-                user_id,
-                "❌ Your message could not be delivered. "
-                "Your partner might have blocked the bot or left. Use /end."
-            )
-            return
-    else:
-        await message.reply_text("⚠️ You are not connected with a partner. Use /search to find one.")
+    if not partner_id:
+        await message.reply_text("⚠️ You are not connected with a partner. Use /search.")
         return
 
-    # ------------------ Logging ------------------
+    # Relay message
     try:
-        user = message.from_user
-        username = f"@{user.username}" if user.username else "NoUsername"
-        mention = f"<a href='tg://user?id={user.id}'>{user.first_name}</a>"
-        base_caption = (
-            f"📩 Message from {mention}\n"
-            f"🆔 <code>{user.id}</code>\n"
-            f"🌐 {username}"
-        )
-
-        if message.text:
-            await client.send_message(
-                config.LOG_CHANNEL,
-                f"{base_caption}\n\n💬 {message.text}",
-                parse_mode="html"
-            )
-        elif message.photo:
-            await client.send_photo(
-                config.LOG_CHANNEL,
-                message.photo.file_id,
-                caption=base_caption,
-                parse_mode="html"
-            )
-        elif message.video:
-            await client.send_video(
-                config.LOG_CHANNEL,
-                message.video.file_id,
-                caption=base_caption,
-                parse_mode="html"
-            )
-        elif message.sticker:
-            await client.send_sticker(config.LOG_CHANNEL, message.sticker.file_id)
-            await client.send_message(
-                config.LOG_CHANNEL,
-                f"{base_caption}\n\n🎭 Sticker",
-                parse_mode="html"
-            )
-        elif message.animation:
-            await client.send_animation(
-                config.LOG_CHANNEL,
-                message.animation.file_id,
-                caption=base_caption,
-                parse_mode="html"
-            )
-        else:
-            await client.send_message(
-                config.LOG_CHANNEL,
-                f"{base_caption}\n\n📎 Other message type",
-                parse_mode="html"
-            )
-
-        print(f"[relay_all] Message logged to LOG_CHANNEL")
+        await message.copy(chat_id=partner_id)
+        update_activity(user_id)
+        update_activity(partner_id)
+        print(f"[relay_all] Relayed message {user_id} ➝ {partner_id}")
     except Exception as e:
-        print(f"[relay_all] Error forwarding to LOG_CHANNEL: {e}")
+        print(f"[relay_all] Relay failed: {e}")
+        sessions.pop(user_id, None)
+        sessions.pop(partner_id, None)
+        await db.reset_partners(user_id, partner_id)
+        await db.update_status(user_id, "idle")
+        await db.update_status(partner_id, "idle")
+        await client.send_message(user_id, "❌ Message failed. Partner may have left. Use /end.")
+        return
+
+    # Log the message
+    try:
+        await log_message(client, user_id, message.from_user.first_name, message)
+        print(f"[relay_all] Logged message from {user_id}")
+    except Exception as e:
+        print(f"[relay_all] Logging failed: {e}")
