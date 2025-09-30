@@ -1,5 +1,6 @@
+import asyncio  # <-- THIS IS THE MISSING LINE
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo.errors import PyMongoError
+from pymongo.errors import PyMongoError, OperationFailure
 from config import MONGO_URI, MONGO_DB_NAME
 
 class Database:
@@ -62,26 +63,42 @@ class Database:
         await self.reset_partner(user1)
         await self.reset_partner(user2)
 
+
     async def set_partners_atomic(self, user1: int, user2: int):
         """
-        Set partners for two users atomically using a MongoDB transaction.
+        Set partners for two users atomically using a MongoDB transaction with retry logic.
         """
-        async with await self.client.start_session() as session:
-            async with session.start_transaction():
-                try:
-                    await self.users.update_one(
-                        {"_id": user1},
-                        {"$set": {"partner_id": user2}},
-                        session=session
-                    )
-                    await self.users.update_one(
-                        {"_id": user2},
-                        {"$set": {"partner_id": user1}},
-                        session=session
-                    )
-                except PyMongoError as e:
-                    print(f"Failed to set partners atomically: {e}")
-                    raise
+        max_retries = 3
+        for attempt in range(max_retries):
+            async with await self.client.start_session() as session:
+                async with session.start_transaction():
+                    try:
+                        await self.users.update_one(
+                            {"_id": user1},
+                            {"$set": {"partner_id": user2}},
+                            session=session
+                        )
+                        await self.users.update_one(
+                            {"_id": user2},
+                            {"$set": {"partner_id": user1}},
+                            session=session
+                        )
+                        # If both updates succeed, we can break the loop
+                        return 
+                    except OperationFailure as e:
+                        # Check if it's a transient write conflict
+                        if e.has_error_label("TransientTransactionError"):
+                            print(f"DB Write Conflict (attempt {attempt + 1}/{max_retries}). Retrying...")
+                            # Wait a short, random time before retrying to avoid another conflict
+                            await asyncio.sleep(0.1 * (attempt + 1)) 
+                            continue # Retry the loop
+                        else:
+                            # It's a different, non-retryable error
+                            print(f"Failed to set partners atomically: {e}")
+                            raise # Re-raise the error
+        # If we get here, all retries failed
+        print(f"Failed to set partners after {max_retries} attempts.")
+        raise OperationFailure("Could not complete partner pairing after multiple retries.")
 
 # ------------------- Shared instance -------------------
 db = Database(MONGO_URI, MONGO_DB_NAME)
