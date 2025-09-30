@@ -70,7 +70,7 @@ async def search_cb(client, query):
     # --- NEW: Debug print to see if this function is even called ---
     print(f"[CALLBACK] search_cb called for user {query.from_user.id}")
 
-    await query.answer(
+    await query.answer()
         
     class FakeMessage:
         def __init__(self, from_user):
@@ -180,9 +180,9 @@ async def myprofile_cmd(client, message):
     if not profile or not profile.get("gender"):
         await message.reply_text("⚠️ You have not set profile yet. Use /profile")
         return
-    caption = f"👤 **Your Profile**\n\n"
-    caption += f"• Name: {profile.get('name','')}\n• Gender: {profile.get('gender','')}\n"
-    caption += f"• Age: {profile.get('age','')}\n• Location: {profile.get('location','')}\n"
+    caption = f"👤 **ʏᴏᴜʀ ᴘʀᴏꜰɪʟᴇ**\n\n"
+    caption += f"• ɴᴀᴍᴇ: {profile.get('name','')}\n• ɢᴇɴᴅᴇʀ: {profile.get('gender','')}\n"
+    caption += f"• ᴀɢᴇ: {profile.get('age','')}\n• ʟᴏᴄᴀᴛɪᴏɴ: {profile.get('location','')}\n"
     await message.reply_text(caption)
 
 # ----------------- Search Partner -----------------
@@ -245,11 +245,11 @@ async def search_command(client: Client, message: Message):
                 partner2_gender = profile2.get("gender", "Not found")
                 text_for_user1 = (
                     f"{emoji_string}\n\n"
-                    "🎉 Congratulations! You are connected with a partner.\n\n"
-                    "👤 **Partner's Details:**\n"
-                    f"• Name: {partner2_name}\n"
-                    f"• Age: {partner2_age}\n"
-                    f"• Gender: {partner2_gender}\n\n"
+                    "🎉 ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ! ʏᴏᴜ ᴀʀᴇ ᴄᴏɴɴᴇᴄᴛᴇᴅ ᴡɪᴛʜ ᴀ ᴘᴀʀᴛɴᴇʀ.\n\n"
+                    "👤 **ᴘᴀʀᴛɴᴇʀ'ꜱ ᴅᴇᴛᴀɪʟꜱ:**\n"
+                    f"• ɴᴀᴍᴇ: {partner2_name}\n"
+                    f"• ᴀɢᴇ: {partner2_age}\n"
+                    f"• ɢᴇɴᴅᴇʀ: {partner2_gender}\n\n"
                     "Say hi to start the conversation!"
                 )
 
@@ -258,11 +258,11 @@ async def search_command(client: Client, message: Message):
                 partner1_gender = profile1.get("gender", "Not found")
                 text_for_user2 = (
                     f"{emoji_string}\n\n"
-                    "🎉 Congratulations! You are connected with a partner.\n\n"
-                    "👤 **Partner's Details:**\n"
-                    f"• Name: {partner1_name}\n"
-                    f"• Age: {partner1_age}\n"
-                    f"• Gender: {partner1_gender}\n\n"
+                    "🎉 ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ! ʏᴏᴜ ᴀʀᴇ ᴄᴏɴɴᴇᴄᴛᴇᴅ ᴡɪᴛʜ ᴀ ᴘᴀʀᴛɴᴇʀ.\n\n"
+                    "👤 **ᴘᴀʀᴛɴᴇʀ'ꜱ ᴅᴇᴛᴀɪʟꜱ:**\n"
+                    f"• ɴᴀᴍᴇ: {partner1_name}\n"
+                    f"• ᴀɢᴇ: {partner1_age}\n"
+                    f"• ɢᴇɴᴅᴇʀ: {partner1_gender}\n\n"
                     "Say hi to start the conversation!"
                 )
 
