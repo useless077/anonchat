@@ -58,7 +58,7 @@ async def start_cmd(client, message):
     ])
     
     await message.reply_photo(
-        photo="https://graph.org/file/1e335a03940be708a9407.jpg",
+        photo="https://graph.org/file/c3be33fb5c2a81a835292-2c39b4021db14d2a69.jpg",
         caption=welcome_text,
         reply_markup=buttons
     )
@@ -230,7 +230,7 @@ async def search_command(client: Client, message: Message):
                 await asyncio.sleep(0.5) # Small delay for effect
 
                 # --- NEW: Get random emojis for the message ---
-                emojis = random.sample(CONNECTION_EMOJIS, 3) # <-- CHANGE HERE
+                emojis = random.sample(REACTION_EMOJIS, 3) # <-- CHANGE HERE
                 emoji_string = " ".join(emojis)
 
                 # Get partner profiles from DB
