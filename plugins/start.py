@@ -1,5 +1,6 @@
 # plugins/start.py
 import asyncio
+import random  # <-- ADD THIS
 from datetime import datetime
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -22,6 +23,10 @@ profile_data = {}
 profile_timeouts = {}
 waiting_users = set()
 waiting_lock = asyncio.Lock()
+
+CONNECTION_EMOJIS = ["🎉", "🥳", "🎊", "✨", "🤝", "💫", "🌟", "🎈"]
+REACTION_EMOJIS = ["👍", "👌", "❤️", "🥰", "😊", "✅", "👏", "😍"]
+CONNECTION_STICKER_ID = "CAACAgUAAxkDAAICOGWf2B8993hE7-sLxT4bQrJlQ9bMAAKPEwACHsGwUvG7v4K6y9nDjE" # Example "Hi" sticker
 
 # ----------------- Commands -----------------
 
@@ -179,6 +184,7 @@ async def myprofile_cmd(client, message):
     await message.reply_text(caption)
 
 # ----------------- Search Partner -----------------
+# ----------------- Search Partner -----------------
 @Client.on_message(filters.command("search"))
 async def search_command(client: Client, message: Message):
     user_id = message.from_user.id
@@ -204,15 +210,73 @@ async def search_command(client: Client, message: Message):
                 await db.update_status(user1_id, "chatting")
                 await db.update_status(user2_id, "chatting")
 
-                await client.send_message(user1_id, "✅ Partner found! Say hi 👋")
-                await client.send_message(user2_id, "✅ Partner found! Say hi 👋")
+                # --- NEW: Get full user objects for detailed logging ---
+                user_objects = await client.get_users([user1_id, user2_id])
+                user1_obj, user2_obj = user_objects[0], user_objects[1]
+
+                # --- NEW: Send animated sticker first ---
+                await client.send_sticker(user1_id, CONNECTION_STICKER_ID)
+                await client.send_sticker(user2_id, CONNECTION_STICKER_ID)
+                await asyncio.sleep(0.5) # Small delay for effect
+
+                # --- NEW: Get random emojis for the message ---
+                emojis = random.sample(CONNECTION_EMOJIS, 3) # <-- CHANGE HERE
+                emoji_string = " ".join(emojis)
+
+                # Get partner profiles from DB
+                user1_db = await db.get_user(user1_id)
+                user2_db = await db.get_user(user2_id)
+                profile1 = user1_db.get("profile", {})
+                profile2 = user2_db.get("profile", {})
+
+                # --- NEW: Create detailed connection messages for users ---
+                partner2_name = profile2.get("name", "Not found")
+                partner2_age = profile2.get("age", "Not found")
+                partner2_gender = profile2.get("gender", "Not found")
+                text_for_user1 = (
+                    f"{emoji_string}\n\n"
+                    "🎉 Congratulations! You are connected with a partner.\n\n"
+                    "👤 **Partner's Details:**\n"
+                    f"• Name: {partner2_name}\n"
+                    f"• Age: {partner2_age}\n"
+                    f"• Gender: {partner2_gender}\n\n"
+                    "Say hi to start the conversation!"
+                )
+
+                partner1_name = profile1.get("name", "Not found")
+                partner1_age = profile1.get("age", "Not found")
+                partner1_gender = profile1.get("gender", "Not found")
+                text_for_user2 = (
+                    f"{emoji_string}\n\n"
+                    "🎉 Congratulations! You are connected with a partner.\n\n"
+                    "👤 **Partner's Details:**\n"
+                    f"• Name: {partner1_name}\n"
+                    f"• Age: {partner1_age}\n"
+                    f"• Gender: {partner1_gender}\n\n"
+                    "Say hi to start the conversation!"
+                )
+
+                await client.send_message(user1_id, text_for_user1, parse_mode=enums.ParseMode.HTML)
+                await client.send_message(user2_id, text_for_user2, parse_mode=enums.ParseMode.HTML)
+
                 print(f"[SEARCH] Successfully paired {user1_id} with {user2_id}")
+
+                # --- NEW: Create detailed log message for the LOG_CHANNEL ---
+                def format_user_info(user):
+                    username = f"@{user.username}" if user.username else "No Username"
+                    return f"<a href='tg://user?id={user.id}'>{user.first_name}</a> ({username}) `[ID: {user.id}]`"
+
+                log_text = (
+                    f"🤝 **New Pairing**\n\n"
+                    f"👤 **User 1:** {format_user_info(user1_obj)}\n"
+                    f"👤 **User 2:** {format_user_info(user2_obj)}"
+                )
 
                 async def log_pairing():
                     try:
                         await client.send_message(
                             config.LOG_CHANNEL,
-                            f"🤝 New Pairing: <a href='tg://user?id={user1_id}'>User {user1_id}</a> with <a href='tg://user?id={user2_id}'>User {user2_id}</a>",
+                            log_text,
                             parse_mode=enums.ParseMode.HTML
                         )
                     except Exception as e:
@@ -278,9 +342,9 @@ async def end_chat(client, message):
 
 
 # ----------------- Relay Messages & Media -----------------
+# ----------------- Relay Messages & Media -----------------
 @Client.on_message(filters.private & ~filters.command(["start","profile","search","next","end","myprofile"]))
 async def relay_all(client: Client, message: Message):
-    # --- SYNTAX ERROR FIXED HERE ---
     print(f"[DEBUG] relay_all handler called for user {message.from_user.id}")
     
     user_id = message.from_user.id
@@ -316,10 +380,17 @@ async def relay_all(client: Client, message: Message):
     try:
         await message.copy(chat_id=partner_id)
 
+        # --- UPDATED: Add a RANDOM reaction to the original message ---
+        # We run this in the background so it doesn't slow down the relay.
         async def add_reaction():
             try:
-                await message.react("👍") 
+                # A list of positive, simple emojis that work well as reactions
+                random_emoji = random.choice(REACTION_EMOJIS) # <-- CHANGE HERE         
+                
+                await message.react(random_emoji) # <-- USE THE RANDOM EMOJI
             except Exception as e:
+                # This can fail if the user has disabled reactions for the bot.
+                # We just log it and don't let it crash the bot.
                 print(f"[Reaction] Failed to add reaction: {e}")
         
         client.loop.create_task(add_reaction())
