@@ -231,14 +231,15 @@ async def relay_all(client: Client, message: Message):
             sessions[user_id] = partner_id
             print(f"[relay_all] Loaded partner_id {partner_id} from DB for user {user_id}")
 
-    print(f"[relay_all] user_id={user_id}, partner_id={partner_id}")
     print(f"[relay_all] sessions: {sessions}")
+    print(f"[relay_all] user_id={user_id}, partner_id={partner_id}")
 
     if partner_id:
         update_activity(user_id)
         try:
             await message.copy(chat_id=partner_id)
             update_activity(partner_id)
+            print(f"[relay_all] Message relayed from {user_id} to {partner_id}")
         except Exception as e:
             print(f"[relay_all] Error sending to partner: {e}")
             sessions.pop(user_id, None)
@@ -308,5 +309,6 @@ async def relay_all(client: Client, message: Message):
                 parse_mode="html"
             )
 
+        print(f"[relay_all] Message logged to LOG_CHANNEL")
     except Exception as e:
-        print(f"Error forwarding to LOG_CHANNEL: {e}")
+        print(f"[relay_all] Error forwarding to LOG_CHANNEL: {e}")
