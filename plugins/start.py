@@ -20,7 +20,7 @@ from database.users import db
 profile_states = {}
 profile_data = {}
 profile_timeouts = {}
-waiting_users = set()  # Corrected variable name
+waiting_users = set()
 waiting_lock = asyncio.Lock()
 
 # ----------------- Commands -----------------
@@ -42,6 +42,41 @@ async def start_cmd(client, message):
         caption="👋 Welcome!\nCommands:\n/profile\n/search\n/myprofile\n/next\n/end",
         reply_markup=buttons
     )
+
+# ----------------- Callback Handlers -----------------
+@Client.on_callback_query(filters.regex("^search$"))
+async def search_cb(client, query):
+    """Handles the 'Search Partner' button click."""
+    # We create a fake message object to reuse the search_command logic
+    # This is a clean way to avoid duplicating code.
+    await query.answer() # Acknowledge the button click
+    message = Message._from_client(
+        client,
+        {
+            "message_id": query.message.message_id,
+            "from": query.from_user,
+            "date": query.message.date,
+            "chat": query.message.chat
+        }
+    )
+    # Now call the main search command function
+    await search_command(client, message)
+
+@Client.on_callback_query(filters.regex("^profile$"))
+async def profile_cb(client, query):
+    """Handles the 'Update Profile' button click."""
+    await query.answer()
+    message = Message._from_client(
+        client,
+        {
+            "message_id": query.message.message_id,
+            "from": query.from_user,
+            "date": query.message.date,
+            "chat": query.message.chat
+        }
+    )
+    await profile_cmd(client, message)
+
 
 # ----------------- Profile -----------------
 @Client.on_message(filters.private & filters.command("profile"))
@@ -133,54 +168,67 @@ async def myprofile_cmd(client, message):
     await message.reply_text(caption)
 
 # ----------------- Search Partner -----------------
+
 @Client.on_message(filters.command("search"))
 async def search_command(client: Client, message: Message):
     user_id = message.from_user.id
-    user_name = message.from_user.first_name
 
     # Check if user is already in a chat or waiting
     if user_id in sessions:
         await message.reply_text("You are already in a chat. Use /end to leave first.")
         return
-    if user_id in waiting_users: # --- FIX 1: Corrected variable name ---
+    if user_id in waiting_users:
         await message.reply_text("You are already searching for a partner... Please wait.")
         return
 
-    # Add user to waiting list
-    waiting_users.add(user_id) # --- FIX 1: Corrected variable name ---
-    await message.reply_text("🔍 Searching for a partner...")
+    # --- THE FIX: Use the lock to prevent race conditions ---
+    async with waiting_lock:
+        # We must re-check the waiting list inside the lock
+        if user_id in waiting_users:
+             await message.reply_text("You are already searching for a partner... Please wait.")
+             return
 
-    # Try to find a partner
-    if len(waiting_users) > 1: # --- FIX 1: Corrected variable name ---
-        # Get two users from the waiting list
-        user1_id = waiting_users.pop()
-        user2_id = waiting_users.pop()
+        # Add user to waiting list
+        waiting_users.add(user_id)
+        await message.reply_text("🔍 Searching for a partner...")
 
-        # --- THIS IS THE CRITICAL PART ---
-        # This is the step that was likely missing in your code.
+        # Try to find a partner
+        if len(waiting_users) > 1:
+            # Get two users from the waiting list
+            user1_id = waiting_users.pop()
+            user2_id = waiting_users.pop()
 
-        # 1. Pair them in the in-memory session
-        set_partner(user1_id, user2_id)
+            # --- CRITICAL PART ---
+            # This is now safe from race conditions
+            try:
+                # 1. Pair them in the in-memory session
+                set_partner(user1_id, user2_id)
 
-        # 2. Pair them in the database ATOMICALLY
-        await db.set_partners_atomic(user1_id, user2_id)
+                # 2. Pair them in the database ATOMICALLY (with retry logic)
+                await db.set_partners_atomic(user1_id, user2_id)
 
-        # 3. Update their status in the database
-        await db.update_status(user1_id, "chatting")
-        await db.update_status(user2_id, "chatting")
+                # 3. Update their status in the database
+                await db.update_status(user1_id, "chatting")
+                await db.update_status(user2_id, "chatting")
 
-        # 4. Notify both users that they are connected
-        await client.send_message(user1_id, "✅ Partner found! Say hi 👋")
-        await client.send_message(user2_id, "✅ Partner found! Say hi 👋")
+                # 4. Notify both users that they are connected
+                await client.send_message(user1_id, "✅ Partner found! Say hi 👋")
+                await client.send_message(user2_id, "✅ Partner found! Say hi 👋")
 
-        print(f"[SEARCH] Successfully paired {user1_id} with {user2_id}")
+                print(f"[SEARCH] Successfully paired {user1_id} with {user2_id}")
 
-        # Optional: Log the new pairing
-        await client.send_message(
-            config.LOG_CHANNEL, # --- FIX 1: Use config.LOG_CHANNEL ---
-            f"🤝 New Pairing: <a href='tg://user?id={user1_id}'>User {user1_id}</a> with <a href='tg://user?id={user2_id}'>User {user2_id}</a>",
-            parse_mode="html"
-        )
+                # Optional: Log the new pairing
+                await client.send_message(
+                    config.LOG_CHANNEL,
+                    f"🤝 New Pairing: <a href='tg://user?id={user1_id}'>User {user1_id}</a> with <a href='tg://user?id={user2_id}'>User {user2_id}</a>",
+                    parse_mode="html"
+                )
+            except Exception as e:
+                # If pairing fails for any reason, put users back in waiting list or notify them
+                print(f"[SEARCH] Error during pairing {user1_id} and {user2_id}: {e}")
+                await client.send_message(user1_id, "❌ An error occurred. Please try searching again.")
+                await client.send_message(user2_id, "❌ An error occurred. Please try searching again.")
+
 
 # ----------------- Next / End -----------------
 @Client.on_message(filters.private & filters.command("next"))
@@ -209,9 +257,9 @@ async def next_cmd(client, message):
         await client.send_message(partner_id, "❌ Your partner left.")
 
         # Start new search immediately for the one who clicked /next
-        await search_command(client, message) # --- FIX 1: Corrected function name ---
+        await search_command(client, message)
     else:
-        await search_command(client, message) # --- FIX 1: Corrected function name ---
+        await search_command(client, message)
 
 
 @Client.on_message(filters.private & filters.command("end"))
@@ -250,10 +298,6 @@ async def end_chat(client, message):
 
 
 # ----------------- Relay Messages & Media -----------------
-
-# Make sure you have these imported from your files
-# from utils import sessions, update_activity, log_message, profile_states
-# from database.users import db
 
 @Client.on_message(filters.private & ~filters.command(["start","profile","search","next","end","myprofile"]))
 async def relay_all(client: Client, message: Message):
@@ -298,6 +342,19 @@ async def relay_all(client: Client, message: Message):
         # Use message.copy() for ALL message types for consistency.
         # It handles text, media, captions, etc., perfectly.
         await message.copy(chat_id=partner_id)
+
+        # --- NEW: Add a reaction to the original message ---
+        # We run this in the background so it doesn't slow down the relay.
+        async def add_reaction():
+            try:
+                # You can change "👍" to any other emoji like "✅", "❤️", etc.
+                await message.react("👍") 
+            except Exception as e:
+                # This can fail if the user has disabled reactions for the bot.
+                # We just log it and don't let it crash the bot.
+                print(f"[Reaction] Failed to add reaction: {e}")
+        
+        client.loop.create_task(add_reaction())
 
         # Update activity for both users
         update_activity(user_id)
