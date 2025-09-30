@@ -23,6 +23,7 @@ profile_data = {}
 profile_timeouts = {}
 waiting_users = set()
 waiting_lock = asyncio.Lock()
+search_flood = {} # user_id -> datetime of last search
 
 CONNECTION_EMOJIS = ["🎉", "🥳", "🎊", "✨", "🤝", "💫", "🌟", "🎈"]
 REACTION_EMOJIS = ["👍", "👌", "❤️", "🥰", "😊", "✅", "👏", "😍"]
@@ -41,17 +42,18 @@ async def start_cmd(client, message):
 
     # New, cleaner welcome message
     welcome_text = (
-        "👋 Welcome to our Anonymous Chat Bot!\n\n"
-        "Use the commands below to start chatting:\n"
-        "• `/profile` - Create or update your profile\n"
-        "• `/search` - Find a random partner to chat with\n"
-        "• `/myprofile` - View your current profile\n"
-        "• `/next` - Skip to the next partner\n"
-        "• `/end` - End the current chat"
+        "👋 ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ ᴏᴜʀ ᴀɴᴏɴʏᴍᴏᴜꜱ ᴄʜᴀᴛ ʙᴏᴛ!\n\n"
+        "ᴜꜱᴇ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅꜱ ʙᴇʟᴏᴡ ᴛᴏ ꜱᴛᴀʀᴛ ᴄʜᴀᴛᴛɪɴɢ:\n"
+        "• `/profile` - ᴄʀᴇᴀᴛᴇ ᴏʀ ᴜᴘᴅᴀᴛᴇ ʏᴏᴜʀ ᴘʀᴏꜰɪʟᴇ\n"
+        "• `/search` - ꜰɪɴᴅ ᴀ ʀᴀɴᴅᴏᴍ ᴘᴀʀᴛɴᴇʀ ᴛᴏ ᴄʜᴀᴛ ᴡɪᴛʜ\n"
+        "• `/myprofile` - ᴠɪᴇᴡ ʏᴏᴜʀ ᴄᴜʀʀᴇɴᴛ ᴘʀᴏꜰɪʟᴇ\n"
+        "• `/next` - ꜱᴋɪᴘ ᴛᴏ ᴛʜᴇ ɴᴇxᴛ ᴘᴀʀᴛɴᴇʀ\n"
+        "• `/end` - ᴇɴᴅ ᴛʜᴇ ᴄᴜʀʀᴇɴᴛ ᴄʜᴀᴛ"
     )
 
+    # First button goes to your channel, second button triggers the search.
     buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✏️ Update Profile", callback_data="profile")],
+        [InlineKeyboardButton("Join our channel", url="https://t.me/venuma")],
         [InlineKeyboardButton("🔍 Search Partner", callback_data="search")]
     ])
     
@@ -65,17 +67,17 @@ async def start_cmd(client, message):
 @Client.on_callback_query(filters.regex("^search$"))
 async def search_cb(client, query):
     """Handles the 'Search Partner' button click."""
-    await query.answer()
-    message = Message._from_client(
-        client,
-        {
-            "message_id": query.message.message_id,
-            "from": query.from_user,
-            "date": query.message.date,
-            "chat": query.message.chat
-        }
-    )
-    await search_command(client, message)
+    # --- NEW: Debug print to see if this function is even called ---
+    print(f"[CALLBACK] search_cb called for user {query.from_user.id}")
+
+    await query.answer(
+        
+    class FakeMessage:
+        def __init__(self, from_user):
+            self.from_user = from_user
+
+    fake_message = FakeMessage(query.from_user)
+    await search_command(client, fake_message)
 
 @Client.on_callback_query(filters.regex("^profile$"))
 async def profile_cb(client, query):
@@ -184,11 +186,19 @@ async def myprofile_cmd(client, message):
     await message.reply_text(caption)
 
 # ----------------- Search Partner -----------------
-# ----------------- Search Partner -----------------
 @Client.on_message(filters.command("search"))
 async def search_command(client: Client, message: Message):
     user_id = message.from_user.id
+    # --- NEW: Anti-spam check ---
+    # If the user has used /search in the last 3 seconds, ignore them.
+    if user_id in search_flood and (datetime.utcnow() - search_flood[user_id]).total_seconds() < 3:
+        print(f"[SEARCH] User {user_id} is spamming /search command. Ignoring.")
+        return
 
+    # Update the last time the user searched
+    search_flood[user_id] = datetime.utcnow()
+    print(f"[SEARCH] User {user_id} passed the anti-spam check. Proceeding.") # This print shows a new search is starting
+    
     async with waiting_lock:
         if user_id in sessions:
             await message.reply_text("You are already in a chat. Use /end to leave first.")
@@ -341,7 +351,6 @@ async def end_chat(client, message):
         await message.reply_text("⚠️ You are not connected to anyone.")
 
 
-# ----------------- Relay Messages & Media -----------------
 # ----------------- Relay Messages & Media -----------------
 @Client.on_message(filters.private & ~filters.command(["start","profile","search","next","end","myprofile"]))
 async def relay_all(client: Client, message: Message):
