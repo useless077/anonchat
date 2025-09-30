@@ -26,7 +26,7 @@ waiting_lock = asyncio.Lock()
 
 CONNECTION_EMOJIS = ["🎉", "🥳", "🎊", "✨", "🤝", "💫", "🌟", "🎈"]
 REACTION_EMOJIS = ["👍", "👌", "❤️", "🥰", "😊", "✅", "👏", "😍"]
-CONNECTION_STICKER_ID = "CAACAgUAAxkDAAICOGWf2B8993hE7-sLxT4bQrJlQ9bMAAKPEwACHsGwUvG7v4K6y9nDjE" # Example "Hi" sticker
+CONNECTION_STICKER_ID = "CAACAgUAAyEFAASH239qAAPmaNu1X46I2IKBOBtfNH3ot9jO0MsAAmIaAAKEFOBWbLL49T60Z7QeBA" # Example "Hi" sticker
 
 # ----------------- Commands -----------------
 
