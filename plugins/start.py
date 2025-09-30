@@ -24,6 +24,7 @@ waiting_users = set()
 waiting_lock = asyncio.Lock()
 
 # ----------------- Commands -----------------
+
 @Client.on_message(filters.private & filters.command("start"))
 async def start_cmd(client, message):
     user_id = message.from_user.id
@@ -33,13 +34,25 @@ async def start_cmd(client, message):
     if not user or not user.get("profile"):
         await db.add_user(user_id, {"name": "", "gender": "", "age": None, "location": "", "dp": None})
 
+    # New, cleaner welcome message
+    welcome_text = (
+        "👋 Welcome to our Anonymous Chat Bot!\n\n"
+        "Use the commands below to start chatting:\n"
+        "• `/profile` - Create or update your profile\n"
+        "• `/search` - Find a random partner to chat with\n"
+        "• `/myprofile` - View your current profile\n"
+        "• `/next` - Skip to the next partner\n"
+        "• `/end` - End the current chat"
+    )
+
     buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Update Profile", callback_data="profile")],
-        [InlineKeyboardButton("Search Partner", callback_data="search")]
+        [InlineKeyboardButton("✏️ Update Profile", callback_data="profile")],
+        [InlineKeyboardButton("🔍 Search Partner", callback_data="search")]
     ])
+    
     await message.reply_photo(
         photo="https://graph.org/file/1e335a03940be708a9407.jpg",
-        caption="👋 Welcome!\nCommands:\n/profile\n/search\n/myprofile\n/next\n/end",
+        caption=welcome_text,
         reply_markup=buttons
     )
 
