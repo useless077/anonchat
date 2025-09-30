@@ -40,13 +40,31 @@ async def start_cmd(client, message):
     user = await db.get_user(user_id)
     is_new = user is None
 
-    # Add / update user
+    # New user → DB la insert + log
+    if is_new:
+        await db.add_user(user_id, {
+            "name": "",
+            "gender": "",
+            "age": None,
+            "location": "",
+            "dp": None
+        })
+
+        # Send log to channel
+        try:
+            await client.send_message(
+                config.LOG_CHANNEL,
+                f"🆕 **New User Joined**\n"
+                f"👤 ID: `{user_id}`\n"
+                f"📛 Name: {first_name}"
+            )
+        except Exception as e:
+            print(f"[LOG ERROR] Could not send to log channel: {e}")
+
+    # Update sessions/in-memory state
     add_user(user_id)
 
-    if not user or not user.get("profile"):
-        await db.add_user(user_id, {"name": "", "gender": "", "age": None, "location": "", "dp": None})
-
-    # New, cleaner welcome message
+    # Welcome text
     welcome_text = (
         "👋 ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ ᴏᴜʀ ᴀɴᴏɴʏᴍᴏᴜꜱ ᴄʜᴀᴛ ʙᴏᴛ!\n\n"
         "ᴜꜱᴇ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅꜱ ʙᴇʟᴏᴡ ᴛᴏ ꜱᴛᴀʀᴛ ᴄʜᴀᴛᴛɪɴɢ:\n"
@@ -57,28 +75,18 @@ async def start_cmd(client, message):
         "• `/end` - ᴇɴᴅ ᴛʜᴇ ᴄᴜʀʀᴇɴᴛ ᴄʜᴀᴛ"
     )
 
+    # Buttons
     buttons = InlineKeyboardMarkup([
         [InlineKeyboardButton("Join our channel", url="https://t.me/venuma")],
         [InlineKeyboardButton("🔍 Search Partner", callback_data="search")]
     ])
-    
+
+    # Send with photo
     await message.reply_photo(
         photo="https://graph.org/file/c3be33fb5c2a81a835292-2c39b4021db14d2a69.jpg",
         caption=welcome_text,
         reply_markup=buttons
     )
-
-    # Log only if new user
-    if is_new:
-        try:
-            await client.send_message(
-                config.LOG_CHANNEL,
-                f"🆕 **New User Joined**\n"
-                f"👤 ID: `{user_id}`\n"
-                f"📛 Name: {first_name}"
-            )
-        except Exception as e:
-            print(f"[LOG ERROR] Could not send to log channel: {e}")
 
 # ----------------- Callback Handlers -----------------
 @Client.on_callback_query(filters.regex("^search$"))
