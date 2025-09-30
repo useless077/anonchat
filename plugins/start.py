@@ -36,12 +36,13 @@ async def start_cmd(client, message):
     user_id = message.from_user.id
     first_name = message.from_user.first_name or "Unknown"
 
-    # Check if user already exists
-    user = await db.get_user(user_id)
-    is_new = user is None
+    # Update sessions/in-memory state
+    add_user(user_id)
 
-    # New user → DB la insert + log
-    if is_new:
+    # Check user in DB
+    user = await db.get_user(user_id)
+
+    if not user:  # First time user
         await db.add_user(user_id, {
             "name": "",
             "gender": "",
@@ -50,7 +51,7 @@ async def start_cmd(client, message):
             "dp": None
         })
 
-        # Send log to channel
+        # Log to channel
         try:
             await client.send_message(
                 config.LOG_CHANNEL,
@@ -60,9 +61,6 @@ async def start_cmd(client, message):
             )
         except Exception as e:
             print(f"[LOG ERROR] Could not send to log channel: {e}")
-
-    # Update sessions/in-memory state
-    add_user(user_id)
 
     # Welcome text
     welcome_text = (
