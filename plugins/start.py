@@ -244,7 +244,7 @@ async def end_chat(client, message):
 
 # ----------------- Relay Messages & Media -----------------
 
-@Client.on_message(filters.private & filters.incoming & ~filters.command(["start","profile","search","next","end","myprofile"]))
+@Client.on_message(filters.private & ~filters.command(["start","profile","search","next","end","myprofile"]))
 async def relay_all(client: Client, message: Message):
     user_id = message.from_user.id
     print(f"[relay_all] Message from {user_id}")
@@ -259,10 +259,18 @@ async def relay_all(client: Client, message: Message):
     if not partner_id:
         user_db = await db.get_user(user_id)
         partner_id = user_db.get("partner_id") if user_db else None
+
         if partner_id:
-            sessions[user_id] = partner_id
-            sessions[partner_id] = user_id  # make sure reverse link exists
-            print(f"[relay_all] Partner {partner_id} loaded from DB for {user_id}")
+            partner_user = await db.get_user(partner_id)
+            if not partner_user or partner_user.get("partner_id") != user_id:
+                # Partner not valid, reset
+                sessions.pop(user_id, None)
+                partner_id = None
+            else:
+                # Restore session
+                sessions[user_id] = partner_id
+                sessions[partner_id] = user_id
+                print(f"[relay_all] Partner {partner_id} restored from DB for {user_id}")
 
     if not partner_id:
         await message.reply_text("⚠️ You are not connected with a partner. Use /search.")
@@ -270,12 +278,22 @@ async def relay_all(client: Client, message: Message):
 
     # Relay message
     try:
-        await message.copy(chat_id=partner_id)
+        if message.text or message.caption:
+            await message.copy(chat_id=partner_id)
+        else:
+            await client.forward_messages(
+                chat_id=partner_id,
+                from_chat_id=user_id,
+                message_ids=message.message_id
+            )
+
         update_activity(user_id)
         update_activity(partner_id)
         print(f"[relay_all] Relayed message {user_id} ➝ {partner_id}")
+
     except Exception as e:
         print(f"[relay_all] Relay failed: {e}")
+        # Reset sessions and DB
         sessions.pop(user_id, None)
         sessions.pop(partner_id, None)
         await db.reset_partners(user_id, partner_id)
