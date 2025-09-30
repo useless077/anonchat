@@ -1,7 +1,7 @@
 # plugins/start.py
 import asyncio
 from datetime import datetime
-from pyrogram import Client, filters
+from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 import config   # for LOG_CHANNEL
 from utils import (    
@@ -173,22 +173,19 @@ async def myprofile_cmd(client, message):
 async def search_command(client: Client, message: Message):
     user_id = message.from_user.id
 
-    # Check if user is already in a chat or waiting
-    if user_id in sessions:
-        await message.reply_text("You are already in a chat. Use /end to leave first.")
-        return
-    if user_id in waiting_users:
-        await message.reply_text("You are already searching for a partner... Please wait.")
-        return
-
     # --- THE FIX: Use the lock to prevent race conditions ---
     async with waiting_lock:
-        # We must re-check the waiting list inside the lock
-        if user_id in waiting_users:
-             await message.reply_text("You are already searching for a partner... Please wait.")
-             return
+        # Check if user is already in a chat
+        if user_id in sessions:
+            await message.reply_text("You are already in a chat. Use /end to leave first.")
+            return
 
-        # Add user to waiting list
+        # Check if user is already waiting
+        if user_id in waiting_users:
+            await message.reply_text("You are already searching for a partner... Please wait.")
+            return
+
+        # If all checks pass, add user to waiting list
         waiting_users.add(user_id)
         await message.reply_text("🔍 Searching for a partner...")
 
@@ -217,17 +214,29 @@ async def search_command(client: Client, message: Message):
 
                 print(f"[SEARCH] Successfully paired {user1_id} with {user2_id}")
 
-                # Optional: Log the new pairing
-                await client.send_message(
-                    config.LOG_CHANNEL,
-                    f"🤝 New Pairing: <a href='tg://user?id={user1_id}'>User {user1_id}</a> with <a href='tg://user?id={user2_id}'>User {user2_id}</a>",
-                    parse_mode="html"
-                )
+                # --- FIX: Log the new pairing (non-blocking and with correct parse mode) ---
+                async def log_pairing():
+                    try:
+                        await client.send_message(
+                            config.LOG_CHANNEL,
+                            f"🤝 New Pairing: <a href='tg://user?id={user1_id}'>User {user1_id}</a> with <a href='tg://user?id={user2_id}'>User {user2_id}</a>",
+                            parse_mode=enums.ParseMode.HTML # <-- THE FIX
+                        )
+                    except Exception as e:
+                        # Don't let a logging error crash the pairing process
+                        print(f"[SEARCH] Failed to log pairing: {e}")
+                
+                # Run the logging in the background
+                client.loop.create_task(log_pairing())
+
             except Exception as e:
-                # If pairing fails for any reason, put users back in waiting list or notify them
+                # If pairing fails for any reason, notify them
                 print(f"[SEARCH] Error during pairing {user1_id} and {user2_id}: {e}")
                 await client.send_message(user1_id, "❌ An error occurred. Please try searching again.")
                 await client.send_message(user2_id, "❌ An error occurred. Please try searching again.")
+                # It's important to remove them from the session if it was created
+                sessions.pop(user1_id, None)
+                sessions.pop(user2_id, None)
 
 
 # ----------------- Next / End -----------------
