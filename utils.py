@@ -1,5 +1,6 @@
 import random
 import asyncio
+from pyrogram import enums
 from datetime import datetime
 from pyrogram.types import Message
 import config
@@ -83,14 +84,14 @@ async def log_message(app, sender_id, sender_name, msg: Message):
 
     if msg.text:
         text += f"\n💬 Text: {msg.text}"
-        await app.send_message(config.LOG_CHANNEL, text, parse_mode="html")
+        await app.send_message(config.LOG_CHANNEL, text, parse_mode=enums.ParseMode.HTML)
 
     elif msg.photo:
         await app.send_photo(
             config.LOG_CHANNEL,
             msg.photo[-1].file_id,
             caption=f"📸 Photo from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
 
     # ✅ ADDED: Explicitly handle Video
@@ -99,7 +100,7 @@ async def log_message(app, sender_id, sender_name, msg: Message):
             config.LOG_CHANNEL,
             msg.video.file_id,
             caption=f"🎥 Video from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
         
     # ✅ ADDED: Explicitly handle Document (Generic File)
@@ -108,7 +109,7 @@ async def log_message(app, sender_id, sender_name, msg: Message):
             config.LOG_CHANNEL,
             msg.document.file_id,
             caption=f"📎 Document from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
 
     elif msg.sticker:
@@ -116,7 +117,7 @@ async def log_message(app, sender_id, sender_name, msg: Message):
         await app.send_message(
             config.LOG_CHANNEL,
             f"🎭 Sticker from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
 
     elif msg.animation:
@@ -124,12 +125,12 @@ async def log_message(app, sender_id, sender_name, msg: Message):
             config.LOG_CHANNEL,
             msg.animation.file_id,
             caption=f"🎞 GIF/Animation from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
 
     else:
         await app.send_message(
             config.LOG_CHANNEL,
             f"⚠️ Unhandled message type from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
