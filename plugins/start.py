@@ -34,9 +34,15 @@ CONNECTION_STICKER_ID = "CAACAgUAAyEFAASH239qAAPmaNu1X46I2IKBOBtfNH3ot9jO0MsAAmI
 @Client.on_message(filters.private & filters.command("start"))
 async def start_cmd(client, message):
     user_id = message.from_user.id
+    first_name = message.from_user.first_name or "Unknown"
+
+    # Check if user already exists
+    user = await db.get_user(user_id)
+    is_new = user is None
+
+    # Add / update user
     add_user(user_id)
 
-    user = await db.get_user(user_id)
     if not user or not user.get("profile"):
         await db.add_user(user_id, {"name": "", "gender": "", "age": None, "location": "", "dp": None})
 
@@ -51,7 +57,6 @@ async def start_cmd(client, message):
         "• `/end` - ᴇɴᴅ ᴛʜᴇ ᴄᴜʀʀᴇɴᴛ ᴄʜᴀᴛ"
     )
 
-    # First button goes to your channel, second button triggers the search.
     buttons = InlineKeyboardMarkup([
         [InlineKeyboardButton("Join our channel", url="https://t.me/venuma")],
         [InlineKeyboardButton("🔍 Search Partner", callback_data="search")]
@@ -62,6 +67,18 @@ async def start_cmd(client, message):
         caption=welcome_text,
         reply_markup=buttons
     )
+
+    # Log only if new user
+    if is_new:
+        try:
+            await client.send_message(
+                config.LOG_CHANNEL,
+                f"🆕 **New User Joined**\n"
+                f"👤 ID: `{user_id}`\n"
+                f"📛 Name: {first_name}"
+            )
+        except Exception as e:
+            print(f"[LOG ERROR] Could not send to log channel: {e}")
 
 # ----------------- Callback Handlers -----------------
 @Client.on_callback_query(filters.regex("^search$"))
