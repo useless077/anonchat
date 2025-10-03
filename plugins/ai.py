@@ -103,51 +103,44 @@ async def ai_responder(client: Client, message: Message):
     if message.text and message.text.startswith('/'):
         return
 
-    # --- 2. RANDOM CHANCE LOGIC (50% for non-replies / non-mentions) ---
-    is_direct_interaction = bool(
+    # --- UPDATED: 100% REPLY LOGIC ---
+    # Check if the message is a reply to the bot itself
+    is_reply_to_bot = bool(
         message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self
-    ) or (
-        message.text and (f"@{client.username}" in message.text or client.username in message.text)
     )
 
-    if not is_direct_interaction:
-        if random.random() < 0.50: 
-            return # Skip responding to keep it human-like
+    # If it's a direct reply, skip the 50% chance check
+    if not is_reply_to_bot:
+        # If it's not a direct reply, then apply the 50% chance
+        is_direct_interaction = bool(
+            message.text and (f"@{client.username}" in message.text or client.username in message.text)
+        )
 
+        if not is_direct_interaction:
+            if random.random() < 0.50: 
+                return # Skip responding to keep it human-like
 
-    # --- 3. STATE-BASED MEDIA/TEXT LOGIC ---
-    current_count = consecutive_media_count.get(chat_id, 0)
+    # --- 3. STATE-BASED REPLY LOGIC ---
     
-    is_user_media = bool(message.sticker or message.animation)
+    # CASE 1: User sent a Sticker or GIF
+    if message.sticker or message.animation:
+        if message.sticker and sticker_cache:
+            # Reply with a random sticker from cache
+            media_id = random.choice(list(sticker_cache))
+            await client.send_sticker(chat_id, media_id, reply_to_message_id=message.id)
+            return
+        elif message.animation and gif_cache:
+            # Reply with a random GIF from cache
+            media_id = random.choice(list(gif_cache))
+            await client.send_animation(chat_id, media_id, reply_to_message_id=message.id)
+            return
+        # If no media in cache, do nothing.
+        return
 
-    if is_user_media and (sticker_cache or gif_cache):
-        # User sent media, check if we should continue the media streak (max 3, as discussed)
-        
-        if current_count < 3: 
-            
-            # Action: Send Media (Sticker/GIF)
-            media_sent = False
-            
-            if sticker_cache and (not gif_cache or random.choice([True, False])): 
-                media_id = random.choice(list(sticker_cache))
-                await client.send_sticker(chat_id, media_id, reply_to_message_id=message.id)
-                media_sent = True
-            elif gif_cache:
-                media_id = random.choice(list(gif_cache))
-                await client.send_animation(chat_id, media_id, reply_to_message_id=message.id)
-                media_sent = True
-                
-            if media_sent:
-                consecutive_media_count[chat_id] = current_count + 1
-                return # Media sent, STOP processing
-            
-        # If current_count >= 3 OR we failed to send media, fall through to text reply logic.
+    # CASE 2: User sent Text or other media (Photo, Video)
+    # Proceed with text-based logic
     
-    # Action: Send Text Reply (This part is reached if current_count >= 3 OR user sent text)
-    consecutive_media_count[chat_id] = 0 # Reset the state when sending text
-
-    
-    # --- 4. LINK/URL CHECK (Before final AI Text Reply) ---
+    # --- LINK/URL CHECK ---
     has_spam_link = False
     if message.entities:
         for entity in message.entities:
@@ -162,33 +155,16 @@ async def ai_responder(client: Client, message: Message):
         await message.reply("⛔️ **Alert**: Thambi ne sootha mootitu iru, inga link podatha.")
         return
 
-    
-    # --- 5. AI TEXT REPLY ---
+    # --- AI TEXT REPLY ---
     await client.send_chat_action(chat_id, enums.ChatAction.TYPING)
 
     prompt = None
     if message.text:
         prompt = f"{AI_PERSONA_PROMPT}\n\nUser Message: {message.text}"
-    
     elif message.photo:
-        prompt = (
-            f"{AI_PERSONA_PROMPT}\n\nUser sent a photo with caption: '{message.caption or ''}'. "
-            "Analyze the context implied by sending a photo and respond conversationally in Tanglish."
-        )
-
+        prompt = f"{AI_PERSONA_PROMPT}\n\nUser sent a photo with caption: '{message.caption or ''}'. Respond conversationally in Tanglish."
     elif message.video:
-        prompt = (
-             f"{AI_PERSONA_PROMPT}\n\nUser sent a video with caption: '{message.caption or ''}'. "
-             "Respond conversationally in Tanglish to the video or caption."
-        )
-        
-    elif message.animation or message.sticker:
-        # If media streak fails, send a text reply acknowledging the media
-        media_type = "GIF" if message.animation else "Sticker"
-        prompt = (
-            f"{AI_PERSONA_PROMPT}\n\nUser just sent a {media_type}. Acknowledge it "
-            "with a witty Tanglish reply."
-        )
+        prompt = f"{AI_PERSONA_PROMPT}\n\nUser sent a video with caption: '{message.caption or ''}'. Respond conversationally in Tanglish."
         
     if not prompt:
         return
@@ -196,9 +172,7 @@ async def ai_responder(client: Client, message: Message):
     try:
         response = model.generate_content(prompt)
         ai_reply = response.text
-
         await message.reply(ai_reply)
-
     except Exception as e:
         print(f"[AI] Reply generate pannumbothu error: {e}")
 
