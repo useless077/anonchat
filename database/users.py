@@ -8,7 +8,7 @@ class Database:
         self.client = AsyncIOMotorClient(mongo_uri)
         self.db = self.client[db_name]
         self.users = self.db["users"]
-        self.groups = self.db["groups"] # <-- ADD THIS LINE
+        self.ai_settings = self.db["ai_settings"] 
 
     # ------------------- Connection -------------------
     async def connect(self):
@@ -102,23 +102,21 @@ class Database:
         print(f"Failed to set partners after {max_retries} attempts.")
         raise OperationFailure("Could not complete partner pairing after multiple retries.")
 
-
-    # ------------------- Group Settings -------------------
-    # <-- ADD THESE NEW METHODS TO THE Database CLASS
+    # ------------------- Group Settings (AI) -------------------
     async def get_ai_status(self, chat_id: int) -> bool:
-        """Checks if AI is enabled for a specific group."""
-        group = await self.groups.find_one({"chat_id": chat_id})
-        if group:
-            return group.get("ai_enabled", False)
-        return False
+        """Checks if AI is enabled for a specific group using _id as the key."""
+        settings = await self.ai_settings.find_one({"_id": chat_id})
+        # If settings exist, return its status; otherwise, default to False
+        return settings.get("ai_enabled", False) if settings else False
 
     async def set_ai_status(self, chat_id: int, status: bool):
-        """Enables or disables AI for a specific group."""
-        await self.groups.update_one(
-            {"chat_id": chat_id},
+        """Enables or disables AI for a specific group using _id as the key."""
+        await self.ai_settings.update_one(
+            {"_id": chat_id}, # ✅ Using _id (chat_id) for faster lookup
             {"$set": {"ai_enabled": status}},
             upsert=True
         )
+
 
 # ------------------- Shared instance -------------------
 db = Database(MONGO_URI, MONGO_DB_NAME)
