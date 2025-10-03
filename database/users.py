@@ -38,10 +38,10 @@ class Database:
             })
  
     async def get_user(self, user_id: int):
-    """
-    Gets a user from the database.
-    Returns the user document if found, otherwise returns None.
-    """
+        """
+        Gets a user from the database.
+        Returns the user document if found, otherwise returns None.
+        """
         return await self.users.find_one({"_id": user_id})
 
     # ------------------- Status -------------------
