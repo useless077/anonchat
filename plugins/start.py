@@ -53,14 +53,22 @@ async def start_cmd(client, message):
 
         # Log to channel
         try:
+            username = f"@{message.from_user.username}" if message.from_user.username else "No Username"
+            log_text = (
+                f"🆕 **New User Joined**\n\n"
+                f"👤 **User:** <a href='tg://user?id={user_id}'>{first_name}</a>\n"
+                f"🆔 **User ID:** `{user_id}`\n"
+                f"📝 **Username:** {username}"
+            )
+        
             await client.send_message(
                 config.LOG_CHANNEL,
-                f"🆕 **New User Joined**\n"
-                f"👤 ID: `{user_id}`\n"
-                f"📛 Name: {first_name}"
+                log_text,
+                parse_mode=enums.ParseMode.HTML
             )
         except Exception as e:
             print(f"[LOG ERROR] Could not send to log channel: {e}")
+            
 
     # Welcome text
     welcome_text = (
