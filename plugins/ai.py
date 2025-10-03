@@ -11,7 +11,7 @@ from database.users import db  # <-- CHANGE THIS LINE
 # --- AI INITIALIZATION ---
 try:
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-pro')
+    model = genai.GenerativeModel('gemini-2.5-flash')
     print("[AI] Gemini AI Initialized successfully!")
 except Exception as e:
     print(f"[AI] Error initializing Gemini AI: {e}")
