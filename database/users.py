@@ -117,6 +117,12 @@ class Database:
             upsert=True
         )
 
+    # --- NEW: ADD THIS FUNCTION ---
+    async def get_all_ai_enabled_chats(self):
+        """Returns a list of all chat IDs where AI is enabled."""
+        # Using self.ai_settings collection
+        chats = self.ai_settings.find({"ai_enabled": True}, {"_id": 1})
+        return [chat["_id"] async for chat in chats]
 
 # ------------------- Shared instance -------------------
 db = Database(MONGO_URI, MONGO_DB_NAME)
