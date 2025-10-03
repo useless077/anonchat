@@ -36,12 +36,13 @@ class Database:
                 "status": "idle",
                 "partner_id": None
             })
-
+ 
     async def get_user(self, user_id: int):
-        user = await self.users.find_one({"_id": user_id})
-        if not user:
-            return {"_id": user_id, "profile": {}, "status": "idle", "partner_id": None}
-        return user
+    """
+    Gets a user from the database.
+    Returns the user document if found, otherwise returns None.
+    """
+        return await self.users.find_one({"_id": user_id})
 
     # ------------------- Status -------------------
     async def update_status(self, user_id: int, status: str):
