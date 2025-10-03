@@ -100,5 +100,23 @@ class Database:
         print(f"Failed to set partners after {max_retries} attempts.")
         raise OperationFailure("Could not complete partner pairing after multiple retries.")
 
+
+    # ------------------- Group Settings -------------------
+    # <-- ADD THESE NEW METHODS TO THE Database CLASS
+    async def get_ai_status(self, chat_id: int) -> bool:
+        """Checks if AI is enabled for a specific group."""
+        group = await self.groups.find_one({"chat_id": chat_id})
+        if group:
+            return group.get("ai_enabled", False)
+        return False
+
+    async def set_ai_status(self, chat_id: int, status: bool):
+        """Enables or disables AI for a specific group."""
+        await self.groups.update_one(
+            {"chat_id": chat_id},
+            {"$set": {"ai_enabled": status}},
+            upsert=True
+        )
+
 # ------------------- Shared instance -------------------
 db = Database(MONGO_URI, MONGO_DB_NAME)
