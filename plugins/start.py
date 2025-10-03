@@ -382,8 +382,13 @@ async def next_cmd(client, message):
         await search_command(client, message)
 
 
+
 @Client.on_message(filters.private & filters.command("end"))
-async def end_chat(client, Client, message: Message):
+async def end_chat(client: Client, message: Message): # <-- Make sure 'message' is here
+    # --- NEW: SAFETY CHECK ---
+    if not message.from_user:
+        return # Should not happen in private chats, but good practice
+
     user_id = message.from_user.id
     partner_id = sessions.get(user_id)
     if not partner_id:
