@@ -4,12 +4,12 @@ import asyncio
 from datetime import datetime
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
-from config import OWNER_ID
+from config import ADMIN_IDS
 from database.users import db
 from utils import get_online_users_count
 
 # --- BROADCAST COMMAND ---
-@Client.on_message(filters.private & filters.command("broadcast") & filters.user(OWNER_ID))
+@Client.on_message(filters.private & filters.command("broadcast") & filters.user(ADMIN_IDS))
 async def broadcast_cmd(client: Client, message: Message):
     """Sends a message to all users of the bot."""
     if len(message.command) < 2:
@@ -61,7 +61,7 @@ async def broadcast_cmd(client: Client, message: Message):
 
 
 # --- STATUS COMMAND ---
-@Client.on_message(filters.private & filters.command("status") & filters.user(OWNER_ID))
+@Client.on_message(filters.private & filters.command("status") & filters.user(ADMIN_IDS))
 async def status_cmd(client: Client, message: Message):
     """Shows the overall bot statistics."""
     
