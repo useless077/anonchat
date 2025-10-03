@@ -98,17 +98,15 @@ async def start_cmd(client, message):
 @Client.on_callback_query(filters.regex("^search$"))
 async def search_cb(client, query):
     """Handles the 'Search Partner' button click."""
-    # --- NEW: Debug print to see if this function is even called ---
+    # We can remove the debug print now, but it's fine to leave it.
     print(f"[CALLBACK] search_cb called for user {query.from_user.id}")
 
+    # Acknowledge the button click
     await query.answer()
-        
-    class FakeMessage:
-        def __init__(self, from_user):
-            self.from_user = from_user
-
-    fake_message = FakeMessage(query.from_user)
-    await search_command(client, fake_message)
+    
+    # The 'query' object contains the original message.
+    # Pass this real message object directly to the search_command function.
+    await search_command(client, query.message)
 
 @Client.on_callback_query(filters.regex("^profile$"))
 async def profile_cb(client, query):
