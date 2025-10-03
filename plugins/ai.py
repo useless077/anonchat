@@ -19,13 +19,13 @@ except Exception as e:
     model = None
 
 # --- GLOBAL CACHE AND STATE MANAGEMENT ---
-
 # Cache to store unique Sticker/GIF file IDs sent by users
 sticker_cache = set()
 gif_cache = set()
 
-# Cache to track how many consecutive stickers/gifs the bot has sent per chat.
-# Logic: If user sends media, bot replies with media up to 3 times, then switches to text.
+# ✅ NEW STATE TRACKER ADDED:
+# Cache to track how many consecutive stickers/gifs the bot has sent per chat
+# Logic: If user sends media, bot replies with media up to 3 times (as per our last discussion).
 # Format: {chat_id: count}
 consecutive_media_count = {} 
 
@@ -43,8 +43,6 @@ AI_PERSONA_PROMPT = (
 URL_PATTERN = r'(https?://\S+|t\.me/\S+|telegram\.me/\S+)'
 
 # --- 1. MEDIA CACHE HANDLER (IMPORTANT!) ---
-# Indha handler, user-ah send panna stickers/GIFs-ah cache la store pannum.
-# Bot-um yaarukum media send panna, athu cache-ah use pannum.
 @Client.on_message(filters.group & (filters.sticker | filters.animation))
 async def cache_media(client: Client, message: Message):
     if message.from_user and message.from_user.is_bot:
@@ -105,24 +103,7 @@ async def ai_responder(client: Client, message: Message):
     if message.text and message.text.startswith('/'):
         return
 
-    # --- 2. LINK/URL CHECK ---
-    # Message la URL irukka nu check pannum. Iruntha, special reply panni exit pannum.
-    has_spam_link = False
-    if message.entities:
-        for entity in message.entities:
-            if entity.type in [enums.MessageEntityType.URL, enums.MessageEntityType.TEXT_LINK]:
-                has_spam_link = True
-                break
-                
-    if message.text and re.search(URL_PATTERN, message.text):
-        has_spam_link = True
-
-    if has_spam_link:
-        await message.reply("⛔️ **Alert**: Thambi ne sootha mootitu iru, inga link podatha.")
-        return
-        
-    # --- 3. RANDOM CHANCE LOGIC (50% for non-replies / non-mentions) ---
-    # Bot-ah mention pannala ya reply pannala, 50% chance la mattum reply pannum.
+    # --- 2. RANDOM CHANCE LOGIC (50% for non-replies / non-mentions) ---
     is_direct_interaction = bool(
         message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self
     ) or (
@@ -133,15 +114,20 @@ async def ai_responder(client: Client, message: Message):
         if random.random() < 0.50: 
             return # Skip responding to keep it human-like
 
-    # --- 4. STATE-BASED MEDIA/TEXT LOGIC ---
+
+    # --- 3. STATE-BASED MEDIA/TEXT LOGIC ---
     current_count = consecutive_media_count.get(chat_id, 0)
+    
     is_user_media = bool(message.sticker or message.animation)
 
     if is_user_media and (sticker_cache or gif_cache):
-        # User sent media, check if we should continue the media streak (max 3)
+        # User sent media, check if we should continue the media streak (max 3, as discussed)
+        
         if current_count < 3: 
+            
+            # Action: Send Media (Sticker/GIF)
             media_sent = False
-            # Randomly choose sticker or GIF from cache
+            
             if sticker_cache and (not gif_cache or random.choice([True, False])): 
                 media_id = random.choice(list(sticker_cache))
                 await client.send_sticker(chat_id, media_id, reply_to_message_id=message.id)
@@ -155,22 +141,54 @@ async def ai_responder(client: Client, message: Message):
                 consecutive_media_count[chat_id] = current_count + 1
                 return # Media sent, STOP processing
             
-    # If media streak is over OR user sent text, reset and proceed to text reply.
-    consecutive_media_count[chat_id] = 0
+        # If current_count >= 3 OR we failed to send media, fall through to text reply logic.
+    
+    # Action: Send Text Reply (This part is reached if current_count >= 3 OR user sent text)
+    consecutive_media_count[chat_id] = 0 # Reset the state when sending text
+
+    
+    # --- 4. LINK/URL CHECK (Before final AI Text Reply) ---
+    has_spam_link = False
+    if message.entities:
+        for entity in message.entities:
+            if entity.type in [enums.MessageEntityType.URL, enums.MessageEntityType.TEXT_LINK]:
+                has_spam_link = True
+                break
+                
+    if message.text and re.search(URL_PATTERN, message.text):
+        has_spam_link = True
+
+    if has_spam_link:
+        await message.reply("⛔️ **Alert**: Thambi ne sootha mootitu iru, inga link podatha.")
+        return
+
+    
+    # --- 5. AI TEXT REPLY ---
     await client.send_chat_action(chat_id, enums.ChatAction.TYPING)
 
-    # --- 5. AI reply ah generate pannrom ---
     prompt = None
     if message.text:
         prompt = f"{AI_PERSONA_PROMPT}\n\nUser Message: {message.text}"
+    
     elif message.photo:
-        prompt = f"{AI_PERSONA_PROMPT}\n\nUser sent a photo with caption: '{message.caption or ''}'. Respond conversationally in Tanglish."
-    elif message.animation:
-        prompt = f"{AI_PERSONA_PROMPT}\n\nUser sent a GIF. Acknowledge the GIF's mood/theme and respond conversationally in Tanglish."
-    elif message.sticker:
-        prompt = f"{AI_PERSONA_PROMPT}\n\nUser sent a sticker. Analyze the sticker's implied emotion and respond conversationally in Tanglish."
+        prompt = (
+            f"{AI_PERSONA_PROMPT}\n\nUser sent a photo with caption: '{message.caption or ''}'. "
+            "Analyze the context implied by sending a photo and respond conversationally in Tanglish."
+        )
+
     elif message.video:
-        prompt = f"{AI_PERSONA_PROMPT}\n\nUser sent a video with caption: '{message.caption or ''}'. Respond conversationally in Tanglish."
+        prompt = (
+             f"{AI_PERSONA_PROMPT}\n\nUser sent a video with caption: '{message.caption or ''}'. "
+             "Respond conversationally in Tanglish to the video or caption."
+        )
+        
+    elif message.animation or message.sticker:
+        # If media streak fails, send a text reply acknowledging the media
+        media_type = "GIF" if message.animation else "Sticker"
+        prompt = (
+            f"{AI_PERSONA_PROMPT}\n\nUser just sent a {media_type}. Acknowledge it "
+            "with a witty Tanglish reply."
+        )
         
     if not prompt:
         return
@@ -178,7 +196,9 @@ async def ai_responder(client: Client, message: Message):
     try:
         response = model.generate_content(prompt)
         ai_reply = response.text
+
         await message.reply(ai_reply)
+
     except Exception as e:
         print(f"[AI] Reply generate pannumbothu error: {e}")
 
@@ -188,11 +208,13 @@ async def send_greeting_message(client: Client, chat_id: int, message_type: str)
     """Scheduled greeting ah generate panni send pannum."""
     if not model:
         return
+
     greeting_prompt = (
         f"You are the friendly group member 'Gemini'. Write a brief, cheerful "
         f"'{message_type}' greeting for the group chat. Keep it natural and short. "
-        f"IMPORTANT: You must write the greeting in Tanglish (a mix of Tamil and English)."
+        f"IMPORTANT: You must write the greeting in Tanglish (a mix of Tamil and English). "
     )
+
     try:
         response = model.generate_content(greeting_prompt)
         await client.send_message(chat_id, response.text)
