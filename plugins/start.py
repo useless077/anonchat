@@ -4,6 +4,7 @@ import random  # <-- ADD THIS
 from datetime import datetime
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from pyrogram.errors import FloodWait, UserIsBlocked, UserIsBot
 import config   # for LOG_CHANNEL
 from utils import (    
     add_user,
@@ -215,18 +216,24 @@ async def myprofile_cmd(client, message):
     await message.reply_text(caption)
 
 # ----------------- Search Partner -----------------
+
 @Client.on_message(filters.command("search"))
 async def search_command(client: Client, message: Message):
     user_id = message.from_user.id
-    # --- NEW: Anti-spam check ---
-    # If the user has used /search in the last 3 seconds, ignore them.
+
+    # --- CRITICAL FIX: BLOCK BOTS FROM SEARCHING ---
+    # This will solve the "USER_IS_BOT" error.
+    if message.from_user.is_bot:
+        print(f"[SEARCH] Bot {user_id} tried to search. Ignoring.")
+        return
+
+    # --- Anti-spam check ---
     if user_id in search_flood and (datetime.utcnow() - search_flood[user_id]).total_seconds() < 3:
         print(f"[SEARCH] User {user_id} is spamming /search command. Ignoring.")
         return
 
-    # Update the last time the user searched
     search_flood[user_id] = datetime.utcnow()
-    print(f"[SEARCH] User {user_id} passed the anti-spam check. Proceeding.") # This print shows a new search is starting
+    print(f"[SEARCH] User {user_id} passed the anti-spam check. Proceeding.")
     
     async with waiting_lock:
         if user_id in sessions:
@@ -249,26 +256,22 @@ async def search_command(client: Client, message: Message):
                 await db.update_status(user1_id, "chatting")
                 await db.update_status(user2_id, "chatting")
 
-                # --- NEW: Get full user objects for detailed logging ---
                 user_objects = await client.get_users([user1_id, user2_id])
                 user1_obj, user2_obj = user_objects[0], user_objects[1]
 
-                # --- NEW: Send animated sticker first ---
                 await client.send_sticker(user1_id, CONNECTION_STICKER_ID)
                 await client.send_sticker(user2_id, CONNECTION_STICKER_ID)
-                await asyncio.sleep(0.5) # Small delay for effect
+                await asyncio.sleep(0.5)
 
-                # --- NEW: Get random emojis for the message ---
-                emojis = random.sample(REACTION_EMOJIS, 3) # <-- CHANGE HERE
+                emojis = random.sample(REACTION_EMOJIS, 3)
                 emoji_string = " ".join(emojis)
 
-                # Get partner profiles from DB
                 user1_db = await db.get_user(user1_id)
                 user2_db = await db.get_user(user2_id)
                 profile1 = user1_db.get("profile", {})
                 profile2 = user2_db.get("profile", {})
 
-                # --- NEW: Create detailed connection messages for users ---
+                # ... (Your existing text_for_user1 and text_for_user2 logic is fine) ...
                 partner2_name = profile2.get("name", "Not found")
                 partner2_age = profile2.get("age", "Not found")
                 partner2_gender = profile2.get("gender", "Not found")
@@ -281,7 +284,6 @@ async def search_command(client: Client, message: Message):
                     f"• ɢᴇɴᴅᴇʀ: {partner2_gender}\n\n"
                     "Say hi to start the conversation!"
                 )
-
                 partner1_name = profile1.get("name", "Not found")
                 partner1_age = profile1.get("age", "Not found")
                 partner1_gender = profile1.get("gender", "Not found")
@@ -300,7 +302,7 @@ async def search_command(client: Client, message: Message):
 
                 print(f"[SEARCH] Successfully paired {user1_id} with {user2_id}")
 
-                # --- NEW: Create detailed log message for the LOG_CHANNEL ---
+                # ... (Your existing log_pairing logic is fine) ...
                 def format_user_info(user):
                     username = f"@{user.username}" if user.username else "No Username"
                     return f"<a href='tg://user?id={user.id}'>{user.first_name}</a> ({username}) `[ID: {user.id}]`"
@@ -313,22 +315,48 @@ async def search_command(client: Client, message: Message):
 
                 async def log_pairing():
                     try:
-                        await client.send_message(
-                            config.LOG_CHANNEL,
-                            log_text,
-                            parse_mode=enums.ParseMode.HTML
-                        )
+                        await client.send_message(config.LOG_CHANNEL, log_text, parse_mode=enums.ParseMode.HTML)
                     except Exception as e:
                         print(f"[SEARCH] Failed to log pairing: {e}")
                 
                 client.loop.create_task(log_pairing())
 
-            except Exception as e:
-                print(f"[SEARCH] Error during pairing {user1_id} and {user2_id}: {e}")
-                await client.send_message(user1_id, "❌ An error occurred. Please try searching again.")
-                await client.send_message(user2_id, "❌ An error occurred. Please try searching again.")
+            # --- NEW: SPECIFIC ERROR HANDLING ---
+            except UserIsBlocked:
+                print(f"[SEARCH] User {user1_id} or {user2_id} has blocked the bot.")
+                # Clean up sessions for the blocked user. No need to send a message.
                 sessions.pop(user1_id, None)
                 sessions.pop(user2_id, None)
+                await db.reset_partners(user1_id, user2_id)
+                await db.update_status(user1_id, "idle")
+                await db.update_status(user2_id, "idle")
+
+            except UserIsBot:
+                print(f"[SEARCH] Tried to pair with a bot. This should not happen now.")
+                # Clean up just in case
+                sessions.pop(user1_id, None)
+                sessions.pop(user2_id, None)
+                await db.reset_partners(user1_id, user2_id)
+
+            except FloodWait as e:
+                print(f"[SEARCH] FloodWait: {e.value}s. Waiting...")
+                await asyncio.sleep(e.value)
+
+            except Exception as e:
+                print(f"[SEARCH] Error during pairing {user1_id} and {user2_id}: {e}")
+                # Clean up sessions on any other error
+                sessions.pop(user1_id, None)
+                sessions.pop(user2_id, None)
+                await db.reset_partners(user1_id, user2_id)
+                # Try to inform users, but this might also fail
+                try:
+                    await client.send_message(user1_id, "❌ An error occurred. Please try searching again.")
+                except Exception:
+                    pass
+                try:
+                    await client.send_message(user2_id, "❌ An error occurred. Please try searching again.")
+                except Exception:
+                    pass
 
 
 # ----------------- Next / End -----------------
@@ -355,7 +383,7 @@ async def next_cmd(client, message):
 
 
 @Client.on_message(filters.private & filters.command("end"))
-async def end_chat(client, message):
+async def end_chat(client, Client, message: Message):
     user_id = message.from_user.id
     partner_id = sessions.get(user_id)
     if not partner_id:
@@ -372,82 +400,82 @@ async def end_chat(client, message):
         waiting_users.discard(partner_id)
 
         await client.send_message(user_id, "❌ You disconnected from the chat.")
-        await client.send_message(partner_id, "❌ Your partner disconnected.")
+        
+        # --- NEW: Handle potential UserIsBlocked error ---
+        try:
+            await client.send_message(partner_id, "❌ Your partner disconnected.")
+        except UserIsBlocked:
+            print(f"[end_chat] Could not notify {partner_id}, they have blocked the bot.")
+        except Exception as e:
+            print(f"[end_chat] Could not notify partner {partner_id}: {e}")
+            
     else:
         waiting_users.discard(user_id)
         sessions.pop(user_id, None)
         await db.update_status(user_id, "idle")
         await message.reply_text("⚠️ You are not connected to anyone.")
 
-
 # ----------------- Relay Messages & Media -----------------
+
 @Client.on_message(filters.private & ~filters.command(["start","profile","search","next","end","myprofile"]))
 async def relay_all(client: Client, message: Message):
-    print(f"[DEBUG] relay_all handler called for user {message.from_user.id}")
-    
     user_id = message.from_user.id
 
     if user_id in profile_states:
-        print(f"[relay_all] {user_id} is in profile setup, ignoring message.")
         return
 
-    print(f"[relay_all] Message from {user_id}")
-
     partner_id = sessions.get(user_id)
-
     if not partner_id:
-        print(f"[relay_all] Partner not in session for {user_id}, checking DB...")
+        # ... (your existing DB check logic is fine) ...
         user_db = await db.get_user(user_id)
         partner_id = user_db.get("partner_id") if user_db else None
-
         if partner_id:
             partner_user = await db.get_user(partner_id)
             if partner_user and partner_user.get("partner_id") == user_id:
                 sessions[user_id] = partner_id
                 sessions[partner_id] = user_id
-                print(f"[relay_all] Partner {partner_id} restored from DB for {user_id}")
             else:
-                print(f"[relay_all] Invalid partner {partner_id} found in DB for {user_id}. Resetting.")
                 await db.reset_partner(user_id)
                 partner_id = None
-
+    
     if not partner_id:
         await message.reply_text("⚠️ You are not connected with a partner. Use /search.")
         return
 
     try:
         await message.copy(chat_id=partner_id)
-
-        # --- UPDATED: Add a RANDOM reaction to the original message ---
-        # We run this in the background so it doesn't slow down the relay.
+        # ... (your reaction and activity logic is fine) ...
         async def add_reaction():
             try:
-                # A list of positive, simple emojis that work well as reactions
-                random_emoji = random.choice(REACTION_EMOJIS) # <-- CHANGE HERE         
-                
-                await message.react(random_emoji) # <-- USE THE RANDOM EMOJI
-            except Exception as e:
-                # This can fail if the user has disabled reactions for the bot.
-                # We just log it and don't let it crash the bot.
-                print(f"[Reaction] Failed to add reaction: {e}")
-        
+                random_emoji = random.choice(REACTION_EMOJIS)         
+                await message.react(random_emoji)
+            except Exception:
+                pass
         client.loop.create_task(add_reaction())
         update_activity(user_id)
         update_activity(partner_id)
-        print(f"[relay_all] Relayed message {user_id} ➝ {partner_id}")
 
     except FloodWait as e:
         print(f"[relay_all] FloodWait: {e.value}s. Waiting...")
         await asyncio.sleep(e.value)
         await message.copy(chat_id=partner_id)
-        print(f"[relay_all] Relayed message {user_id} ➝ {partner_id} after FloodWait")
+
+    except UserIsBlocked:
+        print(f"[relay_all] User {partner_id} has blocked the bot. Ending chat.")
+        await client.send_message(user_id, "❌ Your partner disconnected.")
+        # Clean up the chat
+        sessions.pop(user_id, None)
+        sessions.pop(partner_id, None)
+        await db.reset_partners(user_id, partner_id)
+        await db.update_status(user_id, "idle")
+        await db.update_status(partner_id, "idle")
 
     except Exception as e:
         print(f"[relay_all] Relay failed for {user_id}: {e}")
         await client.send_message(user_id, "❌ Message failed. Connection ended. Use /search to find a new partner.")
+        # Clean up the chat
         sessions.pop(user_id, None)
         await db.update_status(user_id, "idle")
-
         if partner_id:
             await client.send_message(partner_id, "❌ Connection lost due to an error. Use /search to find a new partner.")
             sessions.pop(partner_id, None)
