@@ -1,7 +1,9 @@
+# utils.py
+
 import random
 import asyncio
 from pyrogram import enums
-from datetime import datetime
+from datetime import datetime, timedelta # <-- ADD timedelta
 from pyrogram.types import Message
 import config
 
@@ -74,6 +76,19 @@ def update_activity(user_id: int):
     partner_id = sessions.get(user_id)
     if partner_id:
         chat_timers[partner_id] = datetime.utcnow()
+
+# --- NEW: Online Users Function ---
+def get_online_users_count(minutes: int = 5) -> int:
+    """
+    Returns the count of users active in the last 'x' minutes.
+    This is used by the /status command.
+    """
+    time_threshold = datetime.utcnow() - timedelta(minutes=minutes)
+    count = 0
+    for timestamp in chat_timers.values():
+        if timestamp > time_threshold:
+            count += 1
+    return count
 
 # ----------------- Logging -----------------
 async def log_message(app, sender_id, sender_name, msg: Message):
