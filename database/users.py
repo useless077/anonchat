@@ -8,6 +8,7 @@ class Database:
         self.client = AsyncIOMotorClient(mongo_uri)
         self.db = self.client[db_name]
         self.users = self.db["users"]
+        self.groups = self.db["groups"] # <-- ADD THIS LINE
 
     # ------------------- Connection -------------------
     async def connect(self):
