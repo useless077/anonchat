@@ -28,6 +28,7 @@ if API_ID <= 0:
     raise ValueError("API_ID must be a positive integer")
 API_HASH = get_env_variable('API_HASH', '3448177952613312689f44b9d909b5d3')
 GEMINI_API_KEY = get_env_variable('GEMINI_API_KEY', 'AIzaSyBqGmN6n6276-xhCDs1TzU2xC6ClW2I300')
+GROQ_API_KEY = get_env_variable('GROQ_API_KEY', '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')
 
 # MongoDB
 MONGO_URI = get_env_variable(
