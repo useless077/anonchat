@@ -23,11 +23,8 @@ except Exception as e:
 sticker_cache = set()
 gif_cache = set()
 
-# ✅ NEW STATE TRACKER ADDED:
 # Cache to track how many consecutive stickers/gifs the bot has sent per chat
-# Logic: If user sends media, bot replies with media up to 3 times.
-# Format: {chat_id: count}
-consecutive_media_count = {} 
+consecutive_media_count = {}
 
 # --- AI KU PESUM STYLE (PERSONA PROMPT) ---
 AI_PERSONA_PROMPT = (
@@ -127,11 +124,7 @@ async def ai_responder(client: Client, message: Message):
     is_user_media = bool(message.sticker or message.animation)
 
     if is_user_media and (sticker_cache or gif_cache):
-        # User sent media, check if we should continue the media streak (max 3)
-        
         if current_count < 3: 
-            
-            # Action: Send Media (Sticker/GIF)
             media_sent = False
             
             if sticker_cache and (not gif_cache or random.choice([True, False])): 
@@ -147,22 +140,17 @@ async def ai_responder(client: Client, message: Message):
                 consecutive_media_count[chat_id] = current_count + 1
                 return # Media sent, STOP processing
             
-        # If current_count >= 3 OR we failed to send media, fall through to text reply logic.
-    
-    # Action: Send Text Reply (This part is reached if current_count >= 3 OR user sent text)
+    # Action: Send Text Reply
     consecutive_media_count[chat_id] = 0 # Reset the state when sending text
 
 
     # --- 4. LINK/URL CHECK (Before final AI Text Reply) ---
-    
-    # ✅ Check if the sender is an Admin
     is_sender_admin = False
     try:
         member = await client.get_chat_member(chat_id, message.from_user.id)
         if member.status in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
             is_sender_admin = True
     except Exception:
-        # Fails if user is anonymous or bot is not admin in the group
         pass 
         
     has_spam_link = False
@@ -201,7 +189,6 @@ async def ai_responder(client: Client, message: Message):
         )
         
     elif message.animation or message.sticker:
-        # This runs when the media streak logic fails or ends.
         media_type = "GIF" if message.animation else "Sticker"
         prompt = (
             f"{AI_PERSONA_PROMPT}\n\nUser just sent a {media_type}. Acknowledge it "
