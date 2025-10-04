@@ -5,8 +5,8 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 import config
 from database.users import db
-from plugins.partner import search_command # Import search from the new partner.py
-from plugins.ai import ai_enabled_groups # Import AI state for status
+from plugins.partner import search_command
+from plugins.ai import ai_enabled_groups
 
 # ----------------- Commands -----------------
 
@@ -25,13 +25,14 @@ async def start_cmd(client, message):
     user = await db.get_user(user_id)
 
     if not user:  # First time user
+        # --- CHANGE 1: Added user_type="user" ---
         await db.add_user(user_id, {
             "name": "",
             "gender": "",
             "age": None,
             "location": "",
             "dp": None
-        })
+        }, user_type="user")
 
         # Log to channel
         try:
@@ -52,7 +53,6 @@ async def start_cmd(client, message):
             print(f"[LOG ERROR] Could not send to log channel: {e}")
             
 
-    # --- UNIFIED WELCOME TEXT ---
     welcome_text = (
         "👋 **ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ ᴏᴜʀ ᴘᴏᴡᴇʀꜰᴜʟ ᴄʜᴀᴛ ʙᴏᴛ!**\n\n"
         "ɪ ᴀᴍ ᴍᴏʀᴇ ᴛʜᴀɴ ᴊᴜꜱᴛ ᴀɴ ᴀɴᴏɴʏᴍᴏᴜꜱ ᴄʜᴀᴛ ʙᴏᴛ. ɪ ᴀᴍ ᴀ ᴘᴏᴡᴇʀꜰᴜʟ ᴀɪ ᴄʜᴀᴛ ʙᴏᴛ ᴛᴏᴏ!\n\n"
@@ -68,14 +68,12 @@ async def start_cmd(client, message):
         "• ɪ ᴡɪʟʟ ᴄʜᴀᴛ ɴᴀᴛᴜʀᴀʟʟʏ ɪɴ ʏᴏᴜʀ ɢʀᴏᴜᴘ!"
     )
 
-    # --- UPDATED BUTTONS ---
     buttons = InlineKeyboardMarkup([
         [InlineKeyboardButton("Main Channel", url="https://t.me/venuma")],
         [InlineKeyboardButton("🔍 Search Partner", callback_data="search")],
         [InlineKeyboardButton("Bot Status", callback_data="bot_status")]
     ])
 
-    # Send with photo
     await message.reply_photo(
         photo="https://graph.org/file/c3be33fb5c2a81a835292-2c39b4021db14d2a69.jpg",
         caption=welcome_text,
@@ -86,9 +84,7 @@ async def start_cmd(client, message):
 # ----------------- Callback Handlers -----------------
 @Client.on_callback_query(filters.regex("^search$"))
 async def search_cb(client, query):
-    """Handles the 'Search Partner' button click."""
     await query.answer()
-    # Call the search function from partner.py
     await search_command(client, query.message)
 
 @Client.on_callback_query(filters.regex("^bot_status$"))
@@ -97,14 +93,11 @@ async def bot_status_cb(client, query):
     await query.answer()
     
     try:
-        # Get bot statistics
-        total_users = await db.users.count_documents({})
-        active_chats = await db.users.count_documents({"status": "chatting"}) // 2
+        # --- CHANGE 2: Using new database methods for stats ---
+        total_users = await db.get_total_users()
+        active_chats = await db.get_active_chats()
         ai_groups = len(ai_enabled_groups)
-        
-        # --- NEW: Get Total Groups ---
-        # Assuming group chat IDs are negative numbers in the database
-        total_groups = await db.users.count_documents({"_id": {"$lt": 0}})
+        total_groups = await db.get_total_groups()
         
         status_text = (
             f"🤖 **ʙᴏᴛ ꜱᴛᴀᴛᴜꜱ**\n\n"
@@ -128,13 +121,11 @@ async def new_group(client, message):
     """Handle when bot is added to a new group"""
     bot_id = (await client.get_me()).id
     
-    # Check if bot was added
     for member in message.new_chat_members:
         if member.id == bot_id:
-            # Add group to database to be counted in status
-            await db.add_user(message.chat.id, {"type": "group", "title": message.chat.title})
+            # --- CHANGE 3: Added user_type="group" ---
+            await db.add_user(message.chat.id, {"title": message.chat.title}, user_type="group")
 
-            # Log to channel
             try:
                 chat = message.chat
                 log_text = (
@@ -151,7 +142,6 @@ async def new_group(client, message):
                     parse_mode=enums.ParseMode.HTML
                 )
                 
-                # Send welcome message to group
                 welcome_msg = (
                     "👋 **ᴛʜᴀɴᴋ ʏᴏᴜ ꜰᴏʀ ᴀᴅᴅɪɴɢ ᴍᴇ ᴛᴏ ᴛʜɪꜱ ɢʀᴏᴜᴘ!**\n\n"
                     "🤖 **ɪ'ᴍ ᴀ ᴘᴏᴡᴇʀꜰᴜʟ ᴀɪ ᴄʜᴀᴛ ʙᴏᴛ ᴛʜᴀᴛ ᴄᴀɴ ᴀɴꜱᴡᴇʀ ʏᴏᴜʀ Qᴜᴇꜱᴛɪᴏɴꜱ ᴀɴᴅ ʜᴀᴠᴇ ᴄᴏɴᴠᴇʀꜱᴀᴛɪᴏɴꜱ ᴡɪᴛʜ ʏᴏᴜ.**\n\n"
