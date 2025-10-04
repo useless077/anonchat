@@ -7,7 +7,7 @@ import google.generativeai as genai
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
 from config import GEMINI_API_KEY, ADMIN_IDS
-from database.users import db 
+from database.users import db
 
 # --- AI INITIALIZATION ---
 try:
