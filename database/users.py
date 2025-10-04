@@ -1,4 +1,4 @@
-import asyncio  # <-- THIS IS THE MISSING LINE
+import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import PyMongoError, OperationFailure
 from config import MONGO_URI, MONGO_DB_NAME
@@ -18,23 +18,25 @@ class Database:
         self.client.close()
 
     # ------------------- User CRUD -------------------
-    async def add_user(self, user_id: int, profile: dict):
+    async def add_user(self, user_id: int, profile: dict, user_type: str = "user"):
         """
         Add a new user OR update existing profile.
         Keeps partner_id and status intact if user exists.
+        Added user_type parameter to distinguish between users and groups.
         """
         existing = await self.users.find_one({"_id": user_id})
         if existing:
             await self.users.update_one(
                 {"_id": user_id},
-                {"$set": {"profile": profile}}
+                {"$set": {"profile": profile, "type": user_type}}
             )
         else:
             await self.users.insert_one({
                 "_id": user_id,
                 "profile": profile,
                 "status": "idle",
-                "partner_id": None
+                "partner_id": None,
+                "type": user_type  # "user" or "group"
             })
  
     async def get_user(self, user_id: int):
@@ -64,7 +66,6 @@ class Database:
         """
         await self.reset_partner(user1)
         await self.reset_partner(user2)
-
 
     async def set_partners_atomic(self, user1: int, user2: int):
         """
@@ -117,12 +118,24 @@ class Database:
             upsert=True
         )
 
-    # --- NEW: ADD THIS FUNCTION ---
     async def get_all_ai_enabled_chats(self):
         """Returns a list of all chat IDs where AI is enabled."""
         # Using self.ai_settings collection
         chats = self.ai_settings.find({"ai_enabled": True}, {"_id": 1})
         return [chat["_id"] async for chat in chats]
+
+    # ------------------- Statistics -------------------
+    async def get_total_users(self):
+        """Returns the total number of private users (positive IDs)."""
+        return await self.users.count_documents({"_id": {"$gt": 0}, "type": "user"})
+    
+    async def get_total_groups(self):
+        """Returns the total number of groups (negative IDs)."""
+        return await self.users.count_documents({"_id": {"$lt": 0}, "type": "group"})
+    
+    async def get_active_chats(self):
+        """Returns the number of active chats (users with status 'chatting')."""
+        return await self.users.count_documents({"status": "chatting", "type": "user"}) // 2
 
 # ------------------- Shared instance -------------------
 db = Database(MONGO_URI, MONGO_DB_NAME)
