@@ -9,13 +9,19 @@ from pyrogram.types import Message
 from config import GROQ_API_KEY, ADMIN_IDS
 from database.users import db
 
-# --- GLOBAL STATE FOR AI ---
-ai_enabled_groups = set()
+# --- GROQ MODEL SELECTION (Fixed to a highly stable model) ---
+# NOTE: "llama3-70b-8192-pro" is not officially listed. Using the standard versatile model.
+# Use 'llama-3.3-70b-versatile' for high performance and stability.
+GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
+# If you want the fastest available, try:
+# GROQ_MODEL_NAME = "llama-3.1-8b-instant"
+
 
 # --- AI INITIALIZATION ---
 try:
     groq_client = Groq(api_key=GROQ_API_KEY)
-    print("[AI] Groq AI client successful-a initialize aagiduchu with model: llama3-70b-8192-pro!")
+    # Initialization print statement updated to use the new variable
+    print(f"[AI] Groq AI client successful-a initialize aagiduchu with model: {GROQ_MODEL_NAME}!")
 except Exception as e:
     print(f"[AI] Groq AI initialize pannumbothu error: {e}")
     groq_client = None
@@ -24,6 +30,7 @@ except Exception as e:
 sticker_cache = set()
 gif_cache = set()
 consecutive_media_count = {}
+# NOTE: ai_enabled_groups is still unused, as DB is the source of truth, but leaving it as per original code.
 
 # --- AI KU PESUM STYLE (PERSONA PROMPT) ---
 AI_PERSONA_PROMPT = (
@@ -182,9 +189,9 @@ async def ai_responder(client: Client, message: Message):
         return
 
     try:
-        # Using the correct model name
+        # Fixed: Using the global GROQ_MODEL_NAME variable for consistency
         response = groq_client.chat.completions.create(
-            model="llama3-70b-8192",  # Make sure this is a valid model
+            model=GROQ_MODEL_NAME, 
             messages=messages,
             temperature=0.7,
             max_tokens=500
@@ -197,8 +204,9 @@ async def ai_responder(client: Client, message: Message):
         # Better error handling for Groq
         if "rate" in str(e).lower() or "quota" in str(e).lower():
             await message.reply("🔥 Romba pesureenga! Oru nimisham wait pannunga...")
-        elif "model_decommissioned" in str(e):
-            await message.reply("⚠️ AI model update pannanum. Admin ah contact pannunga.")
+        elif "model_decommissioned" in str(e) or "404" in str(e) or "400" in str(e):
+             # Added 404/400 generic errors to catch model errors
+            await message.reply("⚠️ AI model update pannanum. Admin ah contact pannunga. (Model issue)")
         else:
             await message.reply("Sorry, enaku oru problem varudhu. Try pannunga!")
 
@@ -209,9 +217,9 @@ async def send_greeting_message(client: Client, chat_id: int, message_type: str)
         return
 
     try:
-        # Using the correct model name
+        # Fixed: Using the global GROQ_MODEL_NAME variable for consistency
         response = groq_client.chat.completions.create(
-            model="llama3-70b-8192",  # Make sure this is a valid model
+            model=GROQ_MODEL_NAME, 
             messages=[
                 {"role": "system", "content": "You are the friendly group member 'Groq'. Write brief, cheerful greetings in Tanglish."},
                 {"role": "user", "content": f"Write a '{message_type}' greeting for the group."}
