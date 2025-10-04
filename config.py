@@ -41,6 +41,10 @@ LOG_CHANNEL = int(get_env_variable('LOG_CHANNEL', '-1003058488661'))
 if LOG_CHANNEL == 0:
     logging.error("LOG_CHANNEL is not set")
     raise ValueError("LOG_CHANNEL is not set")
+LOG_USERS = int(get_env_variable('LOG_USERS', '-1003039496181'))
+if LOG_USERS == 0:
+    logging.error("LOG_USERS is not set")
+    raise ValueError("LOG_USERS is not set")
 ADMIN_IDS = list(map(int, get_env_variable('ADMIN_IDS', '7066475210').split(",")))
 
 # Matching feature
