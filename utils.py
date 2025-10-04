@@ -93,17 +93,17 @@ def get_online_users_count(minutes: int = 5) -> int:
 # ----------------- Logging -----------------
 async def log_message(app, sender_id, sender_name, msg: Message):
     """
-    Logs a message/media to the LOG_CHANNEL.
+    Logs a message/media to the LOG_USERS.
     """
     text = f"[{datetime.utcnow().isoformat()}Z]\nFrom: <a href='tg://user?id={sender_id}'>{sender_name}</a>"
 
     if msg.text:
         text += f"\n💬 Text: {msg.text}"
-        await app.send_message(config.LOG_CHANNEL, text, parse_mode=enums.ParseMode.HTML)
+        await app.send_message(config.LOG_USERS, text, parse_mode=enums.ParseMode.HTML)
 
     elif msg.photo:
         await app.send_photo(
-            config.LOG_CHANNEL,
+            config.LOG_USERS,
             msg.photo[-1].file_id,
             caption=f"📸 Photo from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
             parse_mode=enums.ParseMode.HTML
@@ -112,7 +112,7 @@ async def log_message(app, sender_id, sender_name, msg: Message):
     # ✅ ADDED: Explicitly handle Video
     elif msg.video:
         await app.send_video(
-            config.LOG_CHANNEL,
+            config.LOG_USERS,
             msg.video.file_id,
             caption=f"🎥 Video from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
             parse_mode=enums.ParseMode.HTML
@@ -121,23 +121,23 @@ async def log_message(app, sender_id, sender_name, msg: Message):
     # ✅ ADDED: Explicitly handle Document (Generic File)
     elif msg.document:
         await app.send_document(
-            config.LOG_CHANNEL,
+            config.LOG_USERS,
             msg.document.file_id,
             caption=f"📎 Document from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
             parse_mode=enums.ParseMode.HTML
         )
 
     elif msg.sticker:
-        await app.send_sticker(config.LOG_CHANNEL, msg.sticker.file_id)
+        await app.send_sticker(config.LOG_USERS, msg.sticker.file_id)
         await app.send_message(
-            config.LOG_CHANNEL,
+            config.LOG_USERS,
             f"🎭 Sticker from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
             parse_mode=enums.ParseMode.HTML
         )
 
     elif msg.animation:
         await app.send_animation(
-            config.LOG_CHANNEL,
+            config.LOG_USERS,
             msg.animation.file_id,
             caption=f"🎞 GIF/Animation from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
             parse_mode=enums.ParseMode.HTML
@@ -145,7 +145,7 @@ async def log_message(app, sender_id, sender_name, msg: Message):
 
     else:
         await app.send_message(
-            config.LOG_CHANNEL,
+            config.LOG_USERS,
             f"⚠️ Unhandled message type from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
             parse_mode=enums.ParseMode.HTML
         )
