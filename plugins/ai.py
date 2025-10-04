@@ -3,36 +3,33 @@
 import asyncio
 import random
 import re
-import google.generativeai as genai
+from groq import Groq  # <-- CHANGE: Gemini இலிருந்து Groq க்கு மாற்றம்
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
-from config import GEMINI_API_KEY, ADMIN_IDS
+from config import GROQ_API_KEY, ADMIN_IDS  # <-- CHANGE: GEMINI_API_KEY இலிருந்து GROQ_API_KEY
 from database.users import db
 
 # --- GLOBAL STATE FOR AI ---
-ai_enabled_groups = set() # <-- THIS IS THE MISSING LINE
+ai_enabled_groups = set()
 
 # --- AI INITIALIZATION ---
 try:
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-2.5-flash')
-    print("[AI] Gemini AI successful-a initialize aagiduchu!")
+    # CHANGE: Groq client initialization
+    groq_client = Groq(api_key=GROQ_API_KEY)
+    print("[AI] Groq AI successful-a initialize aagiduchu!")
 except Exception as e:
-    print(f"[AI] Gemini AI initialize pannumbothu error: {e}")
-    model = None
+    print(f"[AI] Groq AI initialize pannumbothu error: {e}")
+    groq_client = None
 
 # --- GLOBAL CACHE AND STATE MANAGEMENT ---
-# Cache to store unique Sticker/GIF file IDs sent by users
 sticker_cache = set()
 gif_cache = set()
-
-# Cache to track how many consecutive stickers/gifs the bot has sent per chat
 consecutive_media_count = {}
 
 # --- AI KU PESUM STYLE (PERSONA PROMPT) ---
 AI_PERSONA_PROMPT = (
     "You are a friendly, witty, and highly conversational Telegram group member "
-    "named 'Gemini'. Your goal is to engage in natural, human-like chat, "
+    "named 'Groq'. Your goal is to engage in natural, human-like chat, "
     "keeping conversations flowing and responding to group dynamic. "
     "Do not act like a formal assistant. Keep your replies concise, witty, and relatable. "
     "IMPORTANT: You must always reply in Tanglish, which is a mix of Tamil and English. "
@@ -42,7 +39,7 @@ AI_PERSONA_PROMPT = (
 # --- URL/LINK CHECKER PATTERN ---
 URL_PATTERN = r'(https?://\S+|t\.me/\S+|telegram\.me/\S+)'
 
-# --- 1. MEDIA CACHE HANDLER (IMPORTANT!) ---
+# --- 1. MEDIA CACHE HANDLER ---
 @Client.on_message(filters.group & (filters.sticker | filters.animation))
 async def cache_media(client: Client, message: Message):
     if message.from_user and message.from_user.is_bot:
@@ -56,7 +53,6 @@ async def cache_media(client: Client, message: Message):
         gif_file_id = message.animation.file_id
         if gif_file_id:
             gif_cache.add(gif_file_id)
-
 
 # --- COMMAND HANDLER (/ai on | /ai off) ---
 @Client.on_message(filters.command("ai") & filters.group)
@@ -82,21 +78,20 @@ async def ai_toggle(client: Client, message: Message):
     status = message.command[1].lower()
 
     if status == "on":
-        ai_enabled_groups.add(chat_id) # <-- This line uses the set
+        ai_enabled_groups.add(chat_id)
         await db.set_ai_status(chat_id, True)
         await message.reply("✅ **AI Chatbot ipo ON** aagiduchu.\nNaanum conversation la join pannuren!")
     elif status == "off":
-        ai_enabled_groups.discard(chat_id) # <-- This line also uses the set
+        ai_enabled_groups.discard(chat_id)
         await db.set_ai_status(chat_id, False)
         await message.reply("🛑 **AI Chatbot ipo OFF** aagiduchu.")
     else:
         await message.reply("Correct ah use pannunga. `/ai on` ya `/ai off`.")
 
-
 # --- MAIN AI MESSAGE HANDLER ---
 @Client.on_message(filters.group & ~filters.command(["ai", "start", "search", "next", "end", "myprofile", "profile"]))
 async def ai_responder(client: Client, message: Message):
-    if not model:
+    if not groq_client:  # CHANGE: model இலிருந்து groq_client க்கு மாற்றம்
         return
 
     chat_id = message.chat.id
@@ -109,7 +104,7 @@ async def ai_responder(client: Client, message: Message):
     if message.text and message.text.startswith('/'):
         return
 
-    # --- 2. RANDOM CHANCE LOGIC (50% for non-replies / non-mentions) ---
+    # --- 2. RANDOM CHANCE LOGIC ---
     is_reply_to_bot = bool(
         message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self
     )
@@ -120,8 +115,7 @@ async def ai_responder(client: Client, message: Message):
 
     if not is_direct_interaction:
         if random.random() < 0.50: 
-            return # Skip responding to keep it human-like
-
+            return
 
     # --- 3. STATE-BASED MEDIA/TEXT LOGIC ---
     current_count = consecutive_media_count.get(chat_id, 0)
@@ -143,13 +137,11 @@ async def ai_responder(client: Client, message: Message):
                 
             if media_sent:
                 consecutive_media_count[chat_id] = current_count + 1
-                return # Media sent, STOP processing
+                return
             
-    # Action: Send Text Reply
-    consecutive_media_count[chat_id] = 0 # Reset the state when sending text
+    consecutive_media_count[chat_id] = 0
 
-
-    # --- 4. LINK/URL CHECK (Before final AI Text Reply) ---
+    # --- 4. LINK/URL CHECK ---
     is_sender_admin = False
     try:
         member = await client.get_chat_member(chat_id, message.from_user.id)
@@ -168,65 +160,64 @@ async def ai_responder(client: Client, message: Message):
     if message.text and re.search(URL_PATTERN, message.text):
         has_spam_link = True
 
-    # Block link ONLY IF it's a spam link AND the sender is NOT an admin
     if has_spam_link and not is_sender_admin:
         await message.reply("⛔️ **Alert**: Thambi ne sootha mootitu iru, inga link podatha.")
         return
 
-    
     # --- 5. AI TEXT REPLY ---
     await client.send_chat_action(chat_id, enums.ChatAction.TYPING)
 
-    prompt = None
-    if message.text:
-        prompt = f"{AI_PERSONA_PROMPT}\n\nUser Message: {message.text}"
+    # CHANGE: Groq API call format
+    messages = [{"role": "system", "content": AI_PERSONA_PROMPT}]
     
+    if message.text:
+        messages.append({"role": "user", "content": message.text})
     elif message.photo:
-        prompt = (
-            f"{AI_PERSONA_PROMPT}\n\nUser sent a photo with caption: '{message.caption or ''}'. "
-            "Analyze the context implied by sending a photo and respond conversationally in Tanglish."
-        )
-
+        messages.append({"role": "user", "content": f"User sent a photo with caption: '{message.caption or ''}'. Analyze the context and respond conversationally in Tanglish."})
     elif message.video:
-        prompt = (
-             f"{AI_PERSONA_PROMPT}\n\nUser sent a video with caption: '{message.caption or ''}'. "
-             "Respond conversationally in Tanglish to the video or caption."
-        )
-        
+        messages.append({"role": "user", "content": f"User sent a video with caption: '{message.caption or ''}'. Respond conversationally in Tanglish."})
     elif message.animation or message.sticker:
         media_type = "GIF" if message.animation else "Sticker"
-        prompt = (
-            f"{AI_PERSONA_PROMPT}\n\nUser just sent a {media_type}. Acknowledge it "
-            "with a witty Tanglish reply, as we are switching back to text mode."
-        )
-        
-    if not prompt:
+        messages.append({"role": "user", "content": f"User just sent a {media_type}. Acknowledge it with a witty Tanglish reply."})
+    else:
         return
 
     try:
-        response = model.generate_content(prompt)
-        ai_reply = response.text
-
+        # CHANGE: Groq API call
+        response = groq_client.chat.completions.create(
+            model="llama3-8b-8192",  # அல்லது "mixtral-8x7b-32768"
+            messages=messages,
+            temperature=0.7,
+            max_tokens=500
+        )
+        ai_reply = response.choices[0].message.content
         await message.reply(ai_reply)
 
     except Exception as e:
         print(f"[AI] Reply generate pannumbothu error: {e}")
-
+        # CHANGE: Better error handling for Groq
+        if "rate" in str(e).lower() or "quota" in str(e).lower():
+            await message.reply("🔥 Romba pesureenga! Oru nimisham wait pannunga...")
+        else:
+            await message.reply("Sorry, enaku oru problem varudhu. Try pannunga!")
 
 # --- SCHEDULED GREETING FUNCTIONS ---
 async def send_greeting_message(client: Client, chat_id: int, message_type: str):
     """Scheduled greeting ah generate panni send pannum."""
-    if not model:
+    if not groq_client:  # CHANGE: model இலிருந்து groq_client க்கு மாற்றம்
         return
 
-    greeting_prompt = (
-        f"You are the friendly group member 'Gemini'. Write a brief, cheerful "
-        f"'{message_type}' greeting for the group chat. Keep it natural and short. "
-        f"IMPORTANT: You must write the greeting in Tanglish (a mix of Tamil and English). "
-    )
-
     try:
-        response = model.generate_content(greeting_prompt)
-        await client.send_message(chat_id, response.text)
+        # CHANGE: Groq API call for greetings
+        response = groq_client.chat.completions.create(
+            model="llama3-8b-8192",
+            messages=[
+                {"role": "system", "content": "You are the friendly group member 'Groq'. Write brief, cheerful greetings in Tanglish."},
+                {"role": "user", "content": f"Write a '{message_type}' greeting for the group."}
+            ],
+            temperature=0.7,
+            max_tokens=100
+        )
+        await client.send_message(chat_id, response.choices[0].message.content)
     except Exception as e:
         print(f"[AI] {chat_id} ku scheduled greeting send pannumbothu error: {e}")
