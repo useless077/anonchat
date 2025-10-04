@@ -57,7 +57,39 @@ async def gender_cb(client, query):
     filters.create(lambda _, __, message: message.from_user.id in profile_states)
 )
 async def profile_steps(client, message):
-    # ... (all other code remains the same) ...
+    print(f"[DEBUG] profile_steps handler called for user {message.from_user.id}")
+    
+    user_id = message.from_user.id
+    
+    if user_id not in profile_states: 
+        return
+        
+    profile_timeouts[user_id] = datetime.utcnow()
+    step = profile_states[user_id]
+    
+    if not message.text and step in ["name", "age", "location"]:
+        await message.reply_text("❌ **ᴘʟᴇᴀꜱᴇ ꜱᴇɴᴅ ᴏɴʟʏ ᴛᴇxᴛ ɪɴᴘᴜᴛ ꜰᴏʀ ʏᴏᴜʀ ᴘʀᴏꜰɪʟᴇ ᴅᴇᴛᴀɪʟꜱ (ɴᴀᴍᴇ, ᴀɢᴇ, ʟᴏᴄᴀᴛɪᴏɴ).**")
+        return
+
+    text = message.text.strip()
+    
+    if step == "name":
+        profile_data[user_id]["name"] = text
+        profile_states[user_id] = "gender"
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Male", callback_data="gender_male")],
+            [InlineKeyboardButton("Female", callback_data="gender_female")],
+            [InlineKeyboardButton("Shemale", callback_data="gender_shemale")]
+        ])
+        await message.reply_text("✅ **ɴᴀᴍᴇ ꜱᴀᴠᴇᴅ. ᴄʜᴏᴏꜱᴇ ɢᴇɴᴅᴇʀ:**", reply_markup=buttons)
+    
+    elif step == "age":
+        if not text.isdigit() or not (10 <= int(text) <= 99):
+            await message.reply_text("❌ **ᴇɴᴛᴇʀ ᴠᴀʟɪᴅ ᴀɢᴇ (10-99)**")
+            return
+        profile_data[user_id]["age"] = int(text)
+        profile_states[user_id] = "location"
+        await message.reply_text("✅ **ᴀɢᴇ ꜱᴀᴠᴇᴅ. ɴᴏᴡ ꜱᴇɴᴅ ʏᴏᴜʀ ʟᴏᴄᴀᴛɪᴏɴ (ᴄɪᴛʏ/ᴄᴏᴜɴᴛʀʏ):**")
     
     elif step == "location":
         profile_data[user_id]["location"] = text
@@ -65,7 +97,6 @@ async def profile_steps(client, message):
         profile = user.get("profile", {}) if user else {}
         profile.update(profile_data[user_id])
         
-        # --- CHANGE: Added user_type="user" ---
         await db.add_user(user_id, profile, user_type="user")
         
         profile_states.pop(user_id, None)
@@ -75,7 +106,6 @@ async def profile_steps(client, message):
         await message.reply_text("🎉 **ᴘʀᴏꜰɪʟᴇ ᴜᴘᴅᴀᴛᴇᴅ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!**")
     
     return
-
 
 @Client.on_message(filters.private & filters.command("myprofile"))
 async def myprofile_cmd(client, message):
@@ -241,7 +271,6 @@ async def next_cmd(client, message):
         remove_user(user_id)
         remove_user(partner_id)
 
-        # --- LOGGING TO CHANNEL ---
         try:
             user_objects = await client.get_users([user_id, partner_id])
             user_obj, partner_obj = user_objects[0], user_objects[1]
@@ -294,7 +323,6 @@ async def end_chat(client: Client, message: Message):
         waiting_users.discard(user_id)
         waiting_users.discard(partner_id)
 
-        # --- LOGGING TO CHANNEL ---
         try:
             user_objects = await client.get_users([user_id, partner_id])
             user_obj, partner_obj = user_objects[0], user_objects[1]
