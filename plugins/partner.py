@@ -1,11 +1,11 @@
-# plugins/start.py
+# plugins/partner.py
 import asyncio
-import random  # <-- ADD THIS
+import random
 from datetime import datetime
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from pyrogram.errors import FloodWait, UserIsBlocked, UserIsBot
-import config   # for LOG_CHANNEL
+import config
 from utils import (    
     add_user,
     remove_user,
@@ -17,8 +17,7 @@ from utils import (
 )
 from database.users import db
 
-
-# state holders
+# --- GLOBAL STATE FOR ANONYMOUS CHAT ---
 profile_states = {}
 profile_data = {}
 profile_timeouts = {}
@@ -28,102 +27,7 @@ search_flood = {} # user_id -> datetime of last search
 
 CONNECTION_EMOJIS = ["🎉", "🥳", "🎊", "✨", "🤝", "💫", "🌟", "🎈"]
 REACTION_EMOJIS = ["👍", "👌", "❤️", "🥰", "😊", "✅", "👏", "😍"]
-CONNECTION_STICKER_ID = "CAACAgUAAyEFAASH239qAAPmaNu1X46I2IKBOBtfNH3ot9jO0MsAAmIaAAKEFOBWbLL49T60Z7QeBA" # Example "Hi" sticker
-
-# ----------------- Commands -----------------
-
-@Client.on_message(filters.private & filters.command("start"))
-async def start_cmd(client, message):
-    user_id = message.from_user.id
-    first_name = message.from_user.first_name or "Unknown"
-
-    # Update sessions/in-memory state
-    add_user(user_id)
-
-    # Check user in DB
-    user = await db.get_user(user_id)
-
-    if not user:  # First time user
-        await db.add_user(user_id, {
-            "name": "",
-            "gender": "",
-            "age": None,
-            "location": "",
-            "dp": None
-        })
-
-        # Log to channel
-        try:
-            username = f"@{message.from_user.username}" if message.from_user.username else "No Username"
-            log_text = (
-                f"🆕 **New User Joined**\n\n"
-                f"👤 **User:** <a href='tg://user?id={user_id}'>{first_name}</a>\n"
-                f"🆔 **User ID:** `{user_id}`\n"
-                f"📝 **Username:** {username}"
-            )
-        
-            await client.send_message(
-                config.LOG_CHANNEL,
-                log_text,
-                parse_mode=enums.ParseMode.HTML
-            )
-        except Exception as e:
-            print(f"[LOG ERROR] Could not send to log channel: {e}")
-            
-
-    # Welcome text
-    welcome_text = (
-        "👋 ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ ᴏᴜʀ ᴀɴᴏɴʏᴍᴏᴜꜱ ᴄʜᴀᴛ ʙᴏᴛ!\n\n"
-        "ᴜꜱᴇ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅꜱ ʙᴇʟᴏᴡ ᴛᴏ ꜱᴛᴀʀᴛ ᴄʜᴀᴛᴛɪɴɢ:\n"
-        "• `/profile` - ᴄʀᴇᴀᴛᴇ ᴏʀ ᴜᴘᴅᴀᴛᴇ ʏᴏᴜʀ ᴘʀᴏꜰɪʟᴇ\n"
-        "• `/search` - ꜰɪɴᴅ ᴀ ʀᴀɴᴅᴏᴍ ᴘᴀʀᴛɴᴇʀ ᴛᴏ ᴄʜᴀᴛ ᴡɪᴛʜ\n"
-        "• `/myprofile` - ᴠɪᴇᴡ ʏᴏᴜʀ ᴄᴜʀʀᴇɴᴛ ᴘʀᴏꜰɪʟᴇ\n"
-        "• `/next` - ꜱᴋɪᴘ ᴛᴏ ᴛʜᴇ ɴᴇxᴛ ᴘᴀʀᴛɴᴇʀ\n"
-        "• `/end` - ᴇɴᴅ ᴛʜᴇ ᴄᴜʀʀᴇɴᴛ ᴄʜᴀᴛ"
-    )
-
-    # Buttons
-    buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Join our channel", url="https://t.me/venuma")],
-        [InlineKeyboardButton("🔍 Search Partner", callback_data="search")]
-    ])
-
-    # Send with photo
-    await message.reply_photo(
-        photo="https://graph.org/file/c3be33fb5c2a81a835292-2c39b4021db14d2a69.jpg",
-        caption=welcome_text,
-        reply_markup=buttons
-    )
-
-# ----------------- Callback Handlers -----------------
-@Client.on_callback_query(filters.regex("^search$"))
-async def search_cb(client, query):
-    """Handles the 'Search Partner' button click."""
-    # We can remove the debug print now, but it's fine to leave it.
-    print(f"[CALLBACK] search_cb called for user {query.from_user.id}")
-
-    # Acknowledge the button click
-    await query.answer()
-    
-    # The 'query' object contains the original message.
-    # Pass this real message object directly to the search_command function.
-    await search_command(client, query.message)
-
-@Client.on_callback_query(filters.regex("^profile$"))
-async def profile_cb(client, query):
-    """Handles the 'Update Profile' button click."""
-    await query.answer()
-    message = Message._from_client(
-        client,
-        {
-            "message_id": query.message.message_id,
-            "from": query.from_user,
-            "date": query.message.date,
-            "chat": query.message.chat
-        }
-    )
-    await profile_cmd(client, message)
-
+CONNECTION_STICKER_ID = "CAACAgUAAyEFAASH239qAAPmaNu1X46I2IKBOBtfNH3ot9jO0MsAAmIaAAKEFOBWbLL49T60Z7QeBA"
 
 # ----------------- Profile -----------------
 @Client.on_message(filters.private & filters.command("profile"))
@@ -136,7 +40,7 @@ async def profile_cmd(client, message):
         await client.send_message(user_id, msg)
 
     await start_profile_timer(user_id, send_timeout)
-    await message.reply_text("✏️ Send your full name:")
+    await message.reply_text("✏️ **sᴇɴᴅ ʏᴏᴜʀ ꜰᴜʟʟ ɴᴀᴍᴇ:**")
     
 @Client.on_callback_query(filters.regex("^gender_"))
 async def gender_cb(client, query):
@@ -145,7 +49,7 @@ async def gender_cb(client, query):
     profile_data[user_id]["gender"] = gender
     profile_states[user_id] = "age"
     await query.answer(f"✅ Gender '{gender}' selected")
-    await query.message.reply_text("Now send your age (10-99):")
+    await query.message.reply_text("**ɴᴏᴡ ꜱᴇɴᴅ ʏᴏᴜʀ ᴀɢᴇ (10-99):**")
 
 @Client.on_message(
     filters.private & 
@@ -164,7 +68,7 @@ async def profile_steps(client, message):
     step = profile_states[user_id]
     
     if not message.text and step in ["name", "age", "location"]:
-        await message.reply_text("❌ Please send only **text** input for your profile details (Name, Age, Location).")
+        await message.reply_text("❌ **ᴘʟᴇᴀꜱᴇ ꜱᴇɴᴅ ᴏɴʟʏ ᴛᴇxᴛ ɪɴᴘᴜᴛ ꜰᴏʀ ʏᴏᴜʀ ᴘʀᴏꜰɪʟᴇ ᴅᴇᴛᴀɪʟꜱ (ɴᴀᴍᴇ, ᴀɢᴇ, ʟᴏᴄᴀᴛɪᴏɴ).**")
         return
 
     text = message.text.strip()
@@ -177,15 +81,15 @@ async def profile_steps(client, message):
             [InlineKeyboardButton("Female", callback_data="gender_female")],
             [InlineKeyboardButton("Shemale", callback_data="gender_shemale")]
         ])
-        await message.reply_text("✅ Name saved. Choose gender:", reply_markup=buttons)
+        await message.reply_text("✅ **ɴᴀᴍᴇ ꜱᴀᴠᴇᴅ. ᴄʜᴏᴏꜱᴇ ɢᴇɴᴅᴇʀ:**", reply_markup=buttons)
     
     elif step == "age":
         if not text.isdigit() or not (10 <= int(text) <= 99):
-            await message.reply_text("❌ Enter valid age (10-99)")
+            await message.reply_text("❌ **ᴇɴᴛᴇʀ ᴠᴀʟɪᴅ ᴀɢᴇ (10-99)**")
             return
         profile_data[user_id]["age"] = int(text)
         profile_states[user_id] = "location"
-        await message.reply_text("✅ Age saved. Now send your location (city/country):")
+        await message.reply_text("✅ **ᴀɢᴇ ꜱᴀᴠᴇᴅ. ɴᴏᴡ ꜱᴇɴᴅ ʏᴏᴜʀ ʟᴏᴄᴀᴛɪᴏɴ (ᴄɪᴛʏ/ᴄᴏᴜɴᴛʀʏ):**")
     
     elif step == "location":
         profile_data[user_id]["location"] = text
@@ -198,7 +102,7 @@ async def profile_steps(client, message):
         profile_data.pop(user_id, None)
         profile_timeouts.pop(user_id, None)
         
-        await message.reply_text("🎉 Profile updated successfully!")
+        await message.reply_text("🎉 **ᴘʀᴏꜰɪʟᴇ ᴜᴘᴅᴀᴛᴇᴅ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!**")
     
     return
 
@@ -208,26 +112,24 @@ async def myprofile_cmd(client, message):
     user = await db.get_user(user_id)
     profile = user.get("profile", {}) if user else {}
     if not profile or not profile.get("gender"):
-        await message.reply_text("⚠️ You have not set profile yet. Use /profile")
+        await message.reply_text("⚠️ **ʏᴏᴜ ʜᴀᴠᴇ ɴᴏᴛ ꜱᴇᴛ ᴘʀᴏꜰɪʟᴇ ʏᴇᴛ. ᴜꜱᴇ /ᴘʀᴏꜰɪʟᴇ**")
         return
-    caption = f"👤 **ʏᴏᴜʀ ᴘʀᴏꜰɪʟᴇ**\n\n"
-    caption += f"• ɴᴀᴍᴇ: {profile.get('name','')}\n• ɢᴇɴᴅᴇʀ: {profile.get('gender','')}\n"
-    caption += f"• ᴀɢᴇ: {profile.get('age','')}\n• ʟᴏᴄᴀᴛɪᴏɴ: {profile.get('location','')}\n"
-    await message.reply_text(caption)
+    caption = "👤 **ʏᴏᴜʀ ᴘʀᴏꜰɪʟᴇ**\n\n"
+    caption += f"• **ɴᴀᴍᴇ:** {profile.get('name','')}\n"
+    caption += f"• **ɢᴇɴᴅᴇʀ:** {profile.get('gender','')}\n"
+    caption += f"• **ᴀɢᴇ:** {profile.get('age','')}\n"
+    caption += f"• **ʟᴏᴄᴀᴛɪᴏɴ:** {profile.get('location','')}\n"
+    await message.reply_text(caption, parse_mode=enums.ParseMode.HTML)
 
 # ----------------- Search Partner -----------------
-
 @Client.on_message(filters.command("search"))
 async def search_command(client: Client, message: Message):
     user_id = message.from_user.id
 
-    # --- CRITICAL FIX: BLOCK BOTS FROM SEARCHING ---
-    # This will solve the "USER_IS_BOT" error.
     if message.from_user.is_bot:
         print(f"[SEARCH] Bot {user_id} tried to search. Ignoring.")
         return
 
-    # --- Anti-spam check ---
     if user_id in search_flood and (datetime.utcnow() - search_flood[user_id]).total_seconds() < 3:
         print(f"[SEARCH] User {user_id} is spamming /search command. Ignoring.")
         return
@@ -237,14 +139,14 @@ async def search_command(client: Client, message: Message):
     
     async with waiting_lock:
         if user_id in sessions:
-            await message.reply_text("You are already in a chat. Use /end to leave first.")
+            await message.reply_text("**ʏᴏᴜ ᴀʀᴇ ᴀʟʀᴇᴀᴅʏ ɪɴ ᴀ ᴄʜᴀᴛ. ᴜꜱᴇ /ᴇɴᴅ ᴛᴏ ʟᴇᴀᴠᴇ ꜰɪʀꜱᴛ.**")
             return
         if user_id in waiting_users:
-            await message.reply_text("You are already searching for a partner... Please wait.")
+            await message.reply_text("**ʏᴏᴜ ᴀʀᴇ ᴀʟʀᴇᴀᴅʏ ꜱᴇᴀʀᴄʜɪɴɢ ꜰᴏʀ ᴀ ᴘᴀʀᴛɴᴇʀ... ᴘʟᴇᴀꜱᴇ ᴡᴀɪᴛ.**")
             return
 
         waiting_users.add(user_id)
-        await message.reply_text("🔍 Searching for a partner...")
+        await message.reply_text("🔍 **ꜱᴇᴀʀᴄʜɪɴɢ ꜰᴏʀ ᴀ ᴘᴀʀᴛɴᴇʀ...**")
 
         if len(waiting_users) > 1:
             user1_id = waiting_users.pop()
@@ -271,30 +173,29 @@ async def search_command(client: Client, message: Message):
                 profile1 = user1_db.get("profile", {})
                 profile2 = user2_db.get("profile", {})
 
-                # ... (Your existing text_for_user1 and text_for_user2 logic is fine) ...
                 partner2_name = profile2.get("name", "Not found")
                 partner2_age = profile2.get("age", "Not found")
                 partner2_gender = profile2.get("gender", "Not found")
                 text_for_user1 = (
                     f"{emoji_string}\n\n"
-                    "🎉 ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ! ʏᴏᴜ ᴀʀᴇ ᴄᴏɴɴᴇᴄᴛᴇᴅ ᴡɪᴛʜ ᴀ ᴘᴀʀᴛɴᴇʀ.\n\n"
+                    "🎉 **ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ! ʏᴏᴜ ᴀʀᴇ ᴄᴏɴɴᴇᴄᴛᴇᴅ ᴡɪᴛʜ ᴀ ᴘᴀʀᴛɴᴇʀ.**\n\n"
                     "👤 **ᴘᴀʀᴛɴᴇʀ'ꜱ ᴅᴇᴛᴀɪʟꜱ:**\n"
-                    f"• ɴᴀᴍᴇ: {partner2_name}\n"
-                    f"• ᴀɢᴇ: {partner2_age}\n"
-                    f"• ɢᴇɴᴅᴇʀ: {partner2_gender}\n\n"
-                    "Say hi to start the conversation!"
+                    f"• **ɴᴀᴍᴇ:** {partner2_name}\n"
+                    f"• **ᴀɢᴇ:** {partner2_age}\n"
+                    f"• **ɢᴇɴᴅᴇʀ:** {partner2_gender}\n\n"
+                    "**ꜱᴀʏ ʜɪ ᴛᴏ ꜱᴛᴀʀᴛ ᴛʜᴇ ᴄᴏɴᴠᴇʀꜱᴀᴛɪᴏɴ!**"
                 )
                 partner1_name = profile1.get("name", "Not found")
                 partner1_age = profile1.get("age", "Not found")
                 partner1_gender = profile1.get("gender", "Not found")
                 text_for_user2 = (
                     f"{emoji_string}\n\n"
-                    "🎉 ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ! ʏᴏᴜ ᴀʀᴇ ᴄᴏɴɴᴇᴄᴛᴇᴅ ᴡɪᴛʜ ᴀ ᴘᴀʀᴛɴᴇʀ.\n\n"
+                    "🎉 **ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ! ʏᴏᴜ ᴀʀᴇ ᴄᴏɴɴᴇᴄᴛᴇᴅ ᴡɪᴛʜ ᴀ ᴘᴀʀᴛɴᴇʀ.**\n\n"
                     "👤 **ᴘᴀʀᴛɴᴇʀ'ꜱ ᴅᴇᴛᴀɪʟꜱ:**\n"
-                    f"• ɴᴀᴍᴇ: {partner1_name}\n"
-                    f"• ᴀɢᴇ: {partner1_age}\n"
-                    f"• ɢᴇɴᴅᴇʀ: {partner1_gender}\n\n"
-                    "Say hi to start the conversation!"
+                    f"• **ɴᴀᴍᴇ:** {partner1_name}\n"
+                    f"• **ᴀɢᴇ:** {partner1_age}\n"
+                    f"• **ɢᴇɴᴅᴇʀ:** {partner1_gender}\n\n"
+                    "**ꜱᴀʏ ʜɪ ᴛᴏ ꜱᴛᴀʀᴛ ᴛʜᴇ ᴄᴏɴᴠᴇʀꜱᴀᴛɪᴏɴ!**"
                 )
 
                 await client.send_message(user1_id, text_for_user1, parse_mode=enums.ParseMode.HTML)
@@ -302,7 +203,6 @@ async def search_command(client: Client, message: Message):
 
                 print(f"[SEARCH] Successfully paired {user1_id} with {user2_id}")
 
-                # ... (Your existing log_pairing logic is fine) ...
                 def format_user_info(user):
                     username = f"@{user.username}" if user.username else "No Username"
                     return f"<a href='tg://user?id={user.id}'>{user.first_name}</a> ({username}) `[ID: {user.id}]`"
@@ -321,10 +221,8 @@ async def search_command(client: Client, message: Message):
                 
                 client.loop.create_task(log_pairing())
 
-            # --- NEW: SPECIFIC ERROR HANDLING ---
             except UserIsBlocked:
                 print(f"[SEARCH] User {user1_id} or {user2_id} has blocked the bot.")
-                # Clean up sessions for the blocked user. No need to send a message.
                 sessions.pop(user1_id, None)
                 sessions.pop(user2_id, None)
                 await db.reset_partners(user1_id, user2_id)
@@ -333,7 +231,6 @@ async def search_command(client: Client, message: Message):
 
             except UserIsBot:
                 print(f"[SEARCH] Tried to pair with a bot. This should not happen now.")
-                # Clean up just in case
                 sessions.pop(user1_id, None)
                 sessions.pop(user2_id, None)
                 await db.reset_partners(user1_id, user2_id)
@@ -344,17 +241,15 @@ async def search_command(client: Client, message: Message):
 
             except Exception as e:
                 print(f"[SEARCH] Error during pairing {user1_id} and {user2_id}: {e}")
-                # Clean up sessions on any other error
                 sessions.pop(user1_id, None)
                 sessions.pop(user2_id, None)
                 await db.reset_partners(user1_id, user2_id)
-                # Try to inform users, but this might also fail
                 try:
-                    await client.send_message(user1_id, "❌ An error occurred. Please try searching again.")
+                    await client.send_message(user1_id, "❌ **ᴀɴ ᴇʀʀᴏʀ ᴏᴄᴄᴜʀʀᴇᴅ. ᴘʟᴇᴀꜱᴇ ᴛʀʏ ꜱᴇᴀʀᴄʜɪɴɢ ᴀɢᴀɪɴ.**")
                 except Exception:
                     pass
                 try:
-                    await client.send_message(user2_id, "❌ An error occurred. Please try searching again.")
+                    await client.send_message(user2_id, "❌ **ᴀɴ ᴇʀʀᴏʀ ᴏᴄᴄᴜʀʀᴇᴅ. ᴘʟᴇᴀꜱᴇ ᴛʀʏ ꜱᴇᴀʀᴄʜɪɴɢ ᴀɢᴀɪɴ.**")
                 except Exception:
                     pass
 
@@ -375,8 +270,33 @@ async def next_cmd(client, message):
         remove_user(user_id)
         remove_user(partner_id)
 
-        await client.send_message(user_id, "🔄 Searching for next partner...")
-        await client.send_message(partner_id, "❌ Your partner left.")
+        # --- LOGGING TO CHANNEL ---
+        try:
+            user_objects = await client.get_users([user_id, partner_id])
+            user_obj, partner_obj = user_objects[0], user_objects[1]
+            
+            def format_user_info(user):
+                username = f"@{user.username}" if user.username else "No Username"
+                return f"<a href='tg://user?id={user.id}'>{user.first_name}</a> ({username}) `[ID: {user.id}]`"
+
+            log_text = (
+                f"⏭️ **ᴘᴀʀᴛɴᴇʀ ꜱᴋɪᴘᴘᴇᴅ**\n\n"
+                f"👤 **ᴜꜱᴇʀ:** {format_user_info(user_obj)}\n"
+                f"👤 **ꜱᴋɪᴘᴘᴇᴅ ᴘᴀʀᴛɴᴇʀ:** {format_user_info(partner_obj)}"
+            )
+            
+            async def log_skip():
+                try:
+                    await client.send_message(config.LOG_CHANNEL, log_text, parse_mode=enums.ParseMode.HTML)
+                except Exception as e:
+                    print(f"[NEXT_CMD] Failed to log skip: {e}")
+            
+            client.loop.create_task(log_skip())
+        except Exception as e:
+            print(f"[NEXT_CMD] Could not fetch user info for logging: {e}")
+
+        await client.send_message(user_id, "🔄 **ꜱᴇᴀʀᴄʜɪɴɢ ꜰᴏʀ ɴᴇxᴛ ᴘᴀʀᴛɴᴇʀ...**")
+        await client.send_message(partner_id, "❌ **ʏᴏᴜʀ ᴘᴀʀᴛɴᴇʀ ʟᴇꜰᴛ.**")
         await search_command(client, message)
     else:
         await search_command(client, message)
@@ -384,10 +304,9 @@ async def next_cmd(client, message):
 
 
 @Client.on_message(filters.private & filters.command("end"))
-async def end_chat(client: Client, message: Message): # <-- Make sure 'message' is here
-    # --- NEW: SAFETY CHECK ---
+async def end_chat(client: Client, message: Message):
     if not message.from_user:
-        return # Should not happen in private chats, but good practice
+        return
 
     user_id = message.from_user.id
     partner_id = sessions.get(user_id)
@@ -404,11 +323,35 @@ async def end_chat(client: Client, message: Message): # <-- Make sure 'message' 
         waiting_users.discard(user_id)
         waiting_users.discard(partner_id)
 
-        await client.send_message(user_id, "❌ You disconnected from the chat.")
-        
-        # --- NEW: Handle potential UserIsBlocked error ---
+        # --- LOGGING TO CHANNEL ---
         try:
-            await client.send_message(partner_id, "❌ Your partner disconnected.")
+            user_objects = await client.get_users([user_id, partner_id])
+            user_obj, partner_obj = user_objects[0], user_objects[1]
+
+            def format_user_info(user):
+                username = f"@{user.username}" if user.username else "No Username"
+                return f"<a href='tg://user?id={user.id}'>{user.first_name}</a> ({username}) `[ID: {user.id}]`"
+
+            log_text = (
+                f"🔌 **ᴄʜᴀᴛ ᴇɴᴅᴇᴅ**\n\n"
+                f"👤 **ᴜꜱᴇʀ:** {format_user_info(user_obj)}\n"
+                f"👤 **ᴡɪᴛʜ ᴘᴀʀᴛɴᴇʀ:** {format_user_info(partner_obj)}"
+            )
+
+            async def log_end():
+                try:
+                    await client.send_message(config.LOG_CHANNEL, log_text, parse_mode=enums.ParseMode.HTML)
+                except Exception as e:
+                    print(f"[END_CHAT] Failed to log end: {e}")
+
+            client.loop.create_task(log_end())
+        except Exception as e:
+            print(f"[END_CHAT] Could not fetch user info for logging: {e}")
+
+        await client.send_message(user_id, "❌ **ʏᴏᴜ ᴅɪꜱᴄᴏɴɴᴇᴄᴛᴇᴅ ꜰʀᴏᴍ ᴛʜᴇ ᴄʜᴀᴛ.**")
+        
+        try:
+            await client.send_message(partner_id, "❌ **ʏᴏᴜʀ ᴘᴀʀᴛɴᴇʀ ᴅɪꜱᴄᴏɴɴᴇᴄᴛᴇᴅ.**")
         except UserIsBlocked:
             print(f"[end_chat] Could not notify {partner_id}, they have blocked the bot.")
         except Exception as e:
@@ -418,7 +361,7 @@ async def end_chat(client: Client, message: Message): # <-- Make sure 'message' 
         waiting_users.discard(user_id)
         sessions.pop(user_id, None)
         await db.update_status(user_id, "idle")
-        await message.reply_text("⚠️ You are not connected to anyone.")
+        await message.reply_text("⚠️ **ʏᴏᴜ ᴀʀᴇ ɴᴏᴛ ᴄᴏɴɴᴇᴄᴛᴇᴅ ᴛᴏ ᴀɴʏᴏɴᴇ.**")
 
 # ----------------- Relay Messages & Media -----------------
 
@@ -431,7 +374,6 @@ async def relay_all(client: Client, message: Message):
 
     partner_id = sessions.get(user_id)
     if not partner_id:
-        # ... (your existing DB check logic is fine) ...
         user_db = await db.get_user(user_id)
         partner_id = user_db.get("partner_id") if user_db else None
         if partner_id:
@@ -444,12 +386,12 @@ async def relay_all(client: Client, message: Message):
                 partner_id = None
     
     if not partner_id:
-        await message.reply_text("⚠️ You are not connected with a partner. Use /search.")
+        await message.reply_text("⚠️ **ʏᴏᴜ ᴀʀᴇ ɴᴏᴛ ᴄᴏɴɴᴇᴄᴛᴇᴅ ᴡɪᴛʜ ᴀ ᴘᴀʀᴛɴᴇʀ. ᴜꜱᴇ /ꜱᴇᴀʀᴄʜ.**")
         return
 
     try:
         await message.copy(chat_id=partner_id)
-        # ... (your reaction and activity logic is fine) ...
+        
         async def add_reaction():
             try:
                 random_emoji = random.choice(REACTION_EMOJIS)         
@@ -467,8 +409,7 @@ async def relay_all(client: Client, message: Message):
 
     except UserIsBlocked:
         print(f"[relay_all] User {partner_id} has blocked the bot. Ending chat.")
-        await client.send_message(user_id, "❌ Your partner disconnected.")
-        # Clean up the chat
+        await client.send_message(user_id, "❌ **ʏᴏᴜʀ ᴘᴀʀᴛɴᴇʀ ᴅɪꜱᴄᴏɴɴᴇᴄᴛᴇᴅ.**")
         sessions.pop(user_id, None)
         sessions.pop(partner_id, None)
         await db.reset_partners(user_id, partner_id)
@@ -477,12 +418,11 @@ async def relay_all(client: Client, message: Message):
 
     except Exception as e:
         print(f"[relay_all] Relay failed for {user_id}: {e}")
-        await client.send_message(user_id, "❌ Message failed. Connection ended. Use /search to find a new partner.")
-        # Clean up the chat
+        await client.send_message(user_id, "❌ **ᴍᴇꜱꜱᴀɢᴇ ꜰᴀɪʟᴇᴅ. ᴄᴏɴɴᴇᴄᴛɪᴏɴ ᴇɴᴅᴇᴅ. ᴜꜱᴇ /ꜱᴇᴀʀᴄʜ ᴛᴏ ꜰɪɴᴅ ᴀ ɴᴇᴡ ᴘᴀʀᴛɴᴇʀ.**")
         sessions.pop(user_id, None)
         await db.update_status(user_id, "idle")
         if partner_id:
-            await client.send_message(partner_id, "❌ Connection lost due to an error. Use /search to find a new partner.")
+            await client.send_message(partner_id, "❌ **ᴄᴏɴɴᴇᴄᴛɪᴏɴ ʟᴏꜱᴛ ᴅᴜᴇ ᴛᴏ ᴀɴ ᴇʀʀᴏʀ. ᴜꜱᴇ /ꜱᴇᴀʀᴄʜ ᴛᴏ ꜰɪɴᴅ ᴀ ɴᴇᴡ ᴘᴀʀᴛɴᴇʀ.**")
             sessions.pop(partner_id, None)
             await db.reset_partners(user_id, partner_id)
             await db.update_status(partner_id, "idle")
