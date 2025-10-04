@@ -17,10 +17,8 @@ async def broadcast_cmd(client: Client, message: Message):
 
     broadcast_text = message.text.split(None, 1)[1]
     
-    # --- IMPORTANT FIX: Get only PRIVATE user IDs ---
-    # Group IDs are negative, so we only fetch positive IDs to avoid broadcasting to groups.
-    users_cursor = db.users.find({"_id": {"$gt": 0}}, {"_id": 1})
-    user_ids = [user["_id"] async for user in users_cursor]
+    # --- CHANGE 1: Using new database method ---
+    user_ids = await db.get_all_users() # Assuming you add this method to db.py
     
     total_users = len(user_ids)
     if total_users == 0:
@@ -31,23 +29,19 @@ async def broadcast_cmd(client: Client, message: Message):
     failed_count = 0
     blocked_users = []
 
-    # Initial status message
     status_msg = await message.reply(f"📢 **ʙʀᴏᴀᴅᴄᴀꜱᴛɪɴɢ ᴛᴏ {total_users} ᴜꜱᴇʀꜱ... ᴘʟᴇᴀꜱᴇ ᴡᴀɪᴛ.**", parse_mode=enums.ParseMode.HTML)
 
     for user_id in user_ids:
         try:
             await client.send_message(user_id, broadcast_text)
             success_count += 1
-            # Add a small delay to avoid FloodWait
             await asyncio.sleep(0.1) 
         except Exception as e:
             failed_count += 1
             print(f"[BROADCAST] Failed to send to {user_id}: {e}")
-            # Check if the user blocked the bot
             if "FORBIDDEN" in str(e) or "PEER_ID_INVALID" in str(e):
                 blocked_users.append(user_id)
     
-    # Update the status message
     await status_msg.edit_text(
         f"✅ **ʙʀᴏᴀᴅᴄᴀꜱᴛ ᴄᴏᴍᴘʟᴇᴛᴇ!**\n\n"
         f"👥 **ᴛᴏᴛᴀʟ ᴜꜱᴇʀꜱ:** {total_users}\n"
@@ -66,15 +60,12 @@ async def broadcast_cmd(client: Client, message: Message):
 async def status_cmd(client: Client, message: Message):
     """Shows the overall bot statistics."""
     
-    # Get stats from database
-    total_users = await db.users.count_documents({"_id": {"$gt": 0}}) # Count only private users
-    active_chats = await db.users.count_documents({"status": "chatting"}) // 2 # Each chat has 2 users
-    online_users = get_online_users_count(minutes=5) # Users active in last 5 mins
-    
-    # --- NEW: Get Total Groups ---
-    total_groups = await db.users.count_documents({"_id": {"$lt": 0}})
+    # --- CHANGE 2: Using new database methods for stats ---
+    total_users = await db.get_total_users()
+    active_chats = await db.get_active_chats()
+    online_users = get_online_users_count(minutes=5)
+    total_groups = await db.get_total_groups()
 
-    # Format the status message
     status_text = (
         f"🤖 **ʙᴏᴛ ꜱᴛᴀᴛɪꜱᴛɪᴄꜱ**\n\n"
         f"👥 **ᴛᴏᴛᴀʟ ᴜꜱᴇʀꜱ:** `{total_users}`\n"
