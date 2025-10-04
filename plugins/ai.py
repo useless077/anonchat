@@ -185,7 +185,7 @@ async def ai_responder(client: Client, message: Message):
     try:
         # CHANGE: Groq API call
         response = groq_client.chat.completions.create(
-            model="llama3-8b-8192",  # அல்லது "mixtral-8x7b-32768"
+            model="llama3-70b-8192",  # FIXED: Changed from decommissioned llama3-8b-8192 to llama3-70b-8192
             messages=messages,
             temperature=0.7,
             max_tokens=500
@@ -210,7 +210,7 @@ async def send_greeting_message(client: Client, chat_id: int, message_type: str)
     try:
         # CHANGE: Groq API call for greetings
         response = groq_client.chat.completions.create(
-            model="llama3-8b-8192",
+            model="llama3-70b-8192",  # FIXED: Changed from decommissioned llama3-8b-8192 to llama3-70b-8192
             messages=[
                 {"role": "system", "content": "You are the friendly group member 'Groq'. Write brief, cheerful greetings in Tanglish."},
                 {"role": "user", "content": f"Write a '{message_type}' greeting for the group."}
