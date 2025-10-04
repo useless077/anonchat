@@ -9,6 +9,9 @@ from pyrogram.types import Message
 from config import GEMINI_API_KEY, ADMIN_IDS
 from database.users import db
 
+# --- GLOBAL STATE FOR AI ---
+ai_enabled_groups = set() # <-- THIS IS THE MISSING LINE
+
 # --- AI INITIALIZATION ---
 try:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -79,9 +82,11 @@ async def ai_toggle(client: Client, message: Message):
     status = message.command[1].lower()
 
     if status == "on":
+        ai_enabled_groups.add(chat_id) # <-- This line uses the set
         await db.set_ai_status(chat_id, True)
         await message.reply("✅ **AI Chatbot ipo ON** aagiduchu.\nNaanum conversation la join pannuren!")
     elif status == "off":
+        ai_enabled_groups.discard(chat_id) # <-- This line also uses the set
         await db.set_ai_status(chat_id, False)
         await message.reply("🛑 **AI Chatbot ipo OFF** aagiduchu.")
     else:
