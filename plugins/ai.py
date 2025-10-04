@@ -3,10 +3,10 @@
 import asyncio
 import random
 import re
-from groq import Groq  # <-- CHANGE: Gemini இலிருந்து Groq க்கு மாற்றம்
+from groq import Groq
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
-from config import GROQ_API_KEY, ADMIN_IDS  # <-- CHANGE: GEMINI_API_KEY இலிருந்து GROQ_API_KEY
+from config import GROQ_API_KEY, ADMIN_IDS
 from database.users import db
 
 # --- GLOBAL STATE FOR AI ---
@@ -14,7 +14,6 @@ ai_enabled_groups = set()
 
 # --- AI INITIALIZATION ---
 try:
-    # CHANGE: Groq client initialization
     groq_client = Groq(api_key=GROQ_API_KEY)
     print("[AI] Groq AI successful-a initialize aagiduchu!")
 except Exception as e:
@@ -91,7 +90,7 @@ async def ai_toggle(client: Client, message: Message):
 # --- MAIN AI MESSAGE HANDLER ---
 @Client.on_message(filters.group & ~filters.command(["ai", "start", "search", "next", "end", "myprofile", "profile"]))
 async def ai_responder(client: Client, message: Message):
-    if not groq_client:  # CHANGE: model இலிருந்து groq_client க்கு மாற்றம்
+    if not groq_client:
         return
 
     chat_id = message.chat.id
@@ -167,7 +166,7 @@ async def ai_responder(client: Client, message: Message):
     # --- 5. AI TEXT REPLY ---
     await client.send_chat_action(chat_id, enums.ChatAction.TYPING)
 
-    # CHANGE: Groq API call format
+    # Groq API call format
     messages = [{"role": "system", "content": AI_PERSONA_PROMPT}]
     
     if message.text:
@@ -183,9 +182,9 @@ async def ai_responder(client: Client, message: Message):
         return
 
     try:
-        # CHANGE: Groq API call
+        # Groq API call with currently supported model
         response = groq_client.chat.completions.create(
-            model="llama3-70b-8192",  # FIXED: Changed from decommissioned llama3-8b-8192 to llama3-70b-8192
+            model="llama3-groq-70b-8192-tool-use-preview",  # Using a currently supported model
             messages=messages,
             temperature=0.7,
             max_tokens=500
@@ -195,7 +194,7 @@ async def ai_responder(client: Client, message: Message):
 
     except Exception as e:
         print(f"[AI] Reply generate pannumbothu error: {e}")
-        # CHANGE: Better error handling for Groq
+        # Better error handling for Groq
         if "rate" in str(e).lower() or "quota" in str(e).lower():
             await message.reply("🔥 Romba pesureenga! Oru nimisham wait pannunga...")
         else:
@@ -204,13 +203,13 @@ async def ai_responder(client: Client, message: Message):
 # --- SCHEDULED GREETING FUNCTIONS ---
 async def send_greeting_message(client: Client, chat_id: int, message_type: str):
     """Scheduled greeting ah generate panni send pannum."""
-    if not groq_client:  # CHANGE: model இலிருந்து groq_client க்கு மாற்றம்
+    if not groq_client:
         return
 
     try:
-        # CHANGE: Groq API call for greetings
+        # Groq API call for greetings
         response = groq_client.chat.completions.create(
-            model="llama3-70b-8192",  # FIXED: Changed from decommissioned llama3-8b-8192 to llama3-70b-8192
+            model="llama3-groq-70b-8192-tool-use-preview",  # Using a currently supported model
             messages=[
                 {"role": "system", "content": "You are the friendly group member 'Groq'. Write brief, cheerful greetings in Tanglish."},
                 {"role": "user", "content": f"Write a '{message_type}' greeting for the group."}
