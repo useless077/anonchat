@@ -16,6 +16,8 @@ GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
 # If you want the fastest available, try:
 # GROQ_MODEL_NAME = "llama-3.1-8b-instant"
 
+# --- GLOBAL STATE FOR AI ---
+ai_enabled_groups = set()  # This was missing in your code
 
 # --- AI INITIALIZATION ---
 try:
@@ -30,7 +32,6 @@ except Exception as e:
 sticker_cache = set()
 gif_cache = set()
 consecutive_media_count = {}
-# NOTE: ai_enabled_groups is still unused, as DB is the source of truth, but leaving it as per original code.
 
 # --- AI KU PESUM STYLE (PERSONA PROMPT) ---
 AI_PERSONA_PROMPT = (
