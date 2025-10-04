@@ -137,5 +137,10 @@ class Database:
         """Returns the number of active chats (users with status 'chatting')."""
         return await self.users.count_documents({"status": "chatting", "type": "user"}) // 2
 
+    async def get_all_users(self):
+        """Returns a list of all private user IDs."""
+        users = self.users.find({"_id": {"$gt": 0}, "type": "user"}, {"_id": 1})
+        return [user["_id"] async for user in users]
+
 # ------------------- Shared instance -------------------
 db = Database(MONGO_URI, MONGO_DB_NAME)
