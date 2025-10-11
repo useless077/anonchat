@@ -30,16 +30,8 @@ except Exception as e:
 # --- AI PERSONALITY PROMPT ---
 AI_PERSONA_PROMPT = (
     "You are 'Groq' — unga friend-maari pesura chill Tamil guy. "
-    "Talk in **Tanglish** (Tamil + English mix) like normal Telegram group members. "
-    "Be witty, short, natural, and human — no robotic or assistant tone. "
-    "Use casual Tamil slang (machi, da, dei, super, seri, etc.) but not too much. "
-    "Never translate literally — reply like how a normal Tamil person would chat online. "
-    "Example style:\n"
-    "- 'Enna da scene'\n"
-    "- 'Semma da!'\n"
-    "- 'Appo na sollurathu correct dhan 😎'\n"
-    "- 'Haha, naanum adha nenachen 😂'\n"
-    "Keep it fun and conversational, not like Q&A."
+    "Talk in Tanglish (Tamil + English mix) like normal Telegram group members. "
+    "Be witty, short, natural, and human. Use casual Tamil slang but not too much."
 )
 
 URL_PATTERN = r'(https?://\S+|t\.me/\S+|telegram\.me/\S+)'
@@ -61,12 +53,13 @@ async def ai_toggle(client: Client, message: Message):
     sender = message.from_user
 
     try:
-        is_admin = await client.get_chat_member(chat_id, sender.id)
+        member = await client.get_chat_member(chat_id, sender.id)
+        is_admin = member.status in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER)
     except Exception:
-        is_admin = None
+        is_admin = False
 
     is_owner = sender.id in ADMIN_IDS if isinstance(ADMIN_IDS, (list, tuple, set)) else sender.id == ADMIN_IDS
-    if not (is_owner or (is_admin and is_admin.status in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER))):
+    if not (is_owner or is_admin):
         await message.reply("❌ Only admin or bot owner can use this.")
         return
 
@@ -100,7 +93,7 @@ async def ai_responder(client: Client, message: Message):
     if message.text and message.text.startswith('/'):
         return
 
-    # --- Check if direct interaction ---
+    # --- Check if bot is mentioned or replied to ---
     is_reply_to_bot = (
         message.reply_to_message and
         message.reply_to_message.from_user and
@@ -118,25 +111,11 @@ async def ai_responder(client: Client, message: Message):
     is_user_media = bool(message.sticker or message.animation)
 
     if is_user_media:
-        choice = random.random()
-        if choice < 0.7 and (sticker_cache or gif_cache):
-            if sticker_cache and (not gif_cache or random.choice([True, False])):
+        if sticker_cache or gif_cache:
+            if random.choice([True, False]) and sticker_cache:
                 await client.send_sticker(chat_id, random.choice(list(sticker_cache)), reply_to_message_id=message.id)
             elif gif_cache:
                 await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message.id)
-            consecutive_media_count[chat_id] = current_count + 1
-            return
-
-        funny_lines = [
-            "Haha adhukku oru sticker podanum da 😂",
-            "Semma da, idhuku sticker dhan answer 😎",
-            "Oru reaction venum pola iruku 😆",
-            "Haha apdiya! Na sticker podren 🤭",
-        ]
-        text_reply = random.choice(funny_lines)
-        await message.reply(text_reply)
-        if sticker_cache:
-            await client.send_sticker(chat_id, random.choice(list(sticker_cache)), reply_to_message_id=message.id)
         return
 
     consecutive_media_count[chat_id] = 0
@@ -161,15 +140,13 @@ async def ai_responder(client: Client, message: Message):
     if message.text:
         messages.append({
             "role": "user",
-            "content": f"Group member said: '{message.text}'. Respond casually and naturally in Tanglish, like you're chatting with friends."
+            "content": f"Group member said: '{message.text}'. Respond casually and naturally in Tanglish."
         })
-    elif message.photo:
-        messages.append({"role": "user", "content": f"User sent a photo with caption: '{message.caption or ''}'. React funnily in Tanglish."})
-    elif message.video:
-        messages.append({"role": "user", "content": f"User sent a video with caption: '{message.caption or ''}'. React casually in Tanglish."})
-    elif message.animation or message.sticker:
-        media_type = "GIF" if message.animation else "Sticker"
-        messages.append({"role": "user", "content": f"User sent a {media_type}. React with a short, funny Tanglish line."})
+    elif message.caption:
+        messages.append({
+            "role": "user",
+            "content": f"User sent media with caption: '{message.caption}'. React in Tanglish."
+        })
     else:
         return
 
@@ -177,7 +154,7 @@ async def ai_responder(client: Client, message: Message):
         response = groq_client.chat.completions.create(
             model=GROQ_MODEL_NAME,
             messages=messages,
-            temperature=0.7,
+            temperature=0.8,
             max_tokens=400
         )
         ai_reply = response.choices[0].message.content
@@ -185,43 +162,40 @@ async def ai_responder(client: Client, message: Message):
         await message.reply(ai_reply)
     except Exception as e:
         print(f"[AI] Reply error: {e}")
-        if "rate" in str(e).lower() or "quota" in str(e).lower():
-            await message.reply("🔥 Romba pesureenga! Oru nimisham wait pannunga...")
-        elif "model_decommissioned" in str(e) or "404" in str(e) or "400" in str(e):
-            await message.reply("⚠️ AI model update pannanum. Admin ah contact pannunga.")
-        else:
-            await message.reply("Sorry, enaku oru problem varudhu. Try pannunga!")
+        await message.reply("😅 Enaku oru problem varudhu. Try pannunga!")
 
 # --- 4. GREETING MESSAGE FUNCTION ---
 async def send_greeting_message(client: Client, chat_id: int, message_type: str):
-    if not groq_client:
-        return
+    """Send good morning or night greeting"""
     try:
-        response = groq_client.chat.completions.create(
-            model=GROQ_MODEL_NAME,
-            messages=[
-                {"role": "system", "content": "You are 'Groq', a friendly Tanglish group member. Keep greetings short and funny."},
-                {"role": "user", "content": f"Write a '{message_type}' greeting in Tanglish for the group."}
-            ],
-            temperature=0.8,
-            max_tokens=100
-        )
-        await client.send_message(chat_id, response.choices[0].message.content)
+        greetings = {
+            "good morning": random.choice([
+                "Gud mrng da pasanga ☀️",
+                "Morning makkal! Coffee ready ah? ☕",
+                "Innikum fresh-a start pannalam 😎",
+                "Vanga da morning vibes ✨"
+            ]),
+            "good night": random.choice([
+                "Good night da nanbargale 🌙",
+                "Sleep well da, naliki meet pannalam 😴",
+                "Night la vela mudichacha 😂",
+                "Innikki romba pesiten, bye da 😆"
+            ])
+        }
+        await client.send_message(chat_id, greetings.get(message_type, "Hi da!"))
     except Exception as e:
-        print(f"[AI] Greeting send error ({chat_id}): {e}")
+        print(f"[AI Greeting Error] {e}")
 
 # --- 5. AUTO GREETING SCHEDULER ---
 async def auto_greeting_scheduler(client: Client):
-    """Runs in background, sends morning/night greetings to AI-enabled groups."""
+    """Runs in background to send greetings"""
     await asyncio.sleep(10)
     while True:
         try:
             now = datetime.now().time()
-            # 07:30 Morning, 22:30 Night
             morning_time = time(7, 30)
             night_time = time(22, 30)
 
-            # Get all AI-enabled groups from DB
             groups = await db.get_all_ai_enabled_groups()
             if not groups:
                 await asyncio.sleep(300)
@@ -234,13 +208,11 @@ async def auto_greeting_scheduler(client: Client):
                 for group_id in groups:
                     await send_greeting_message(client, group_id, "good night")
 
-            await asyncio.sleep(300)  # Check every 5 minutes
+            await asyncio.sleep(300)
         except Exception as e:
-            print(f"[AI Scheduler] Error: {e}")
+            print(f"[AI Scheduler Error] {e}")
             await asyncio.sleep(300)
 
-# --- 6. START SCHEDULER WHEN BOT STARTS ---
-@Client.on_startup
-async def start_scheduler(client: Client):
+# --- 6. START GREETING SCHEDULER MANUALLY ---
+async def start_greeting_scheduler(client: Client):
     asyncio.create_task(auto_greeting_scheduler(client))
-    print("[AI] Auto greeting scheduler started successfully ✅")
