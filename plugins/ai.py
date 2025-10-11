@@ -1,72 +1,58 @@
-# plugins/ai.py
-
 import asyncio
 import random
 import re
-from datetime import datetime, time, timedelta
+from datetime import datetime
 from groq import Groq
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
 from config import GROQ_API_KEY, ADMIN_IDS
 from database.users import db
 
-# --- GROQ MODEL SELECTION ---
+# --- MODEL NAME ---
 GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
 
 # --- GLOBAL STATE ---
 ai_enabled_groups = set()
 sticker_cache = set()
 gif_cache = set()
-consecutive_media_count = {}
 
-# --- AI INITIALIZATION ---
+# --- INIT GROQ CLIENT ---
 try:
     groq_client = Groq(api_key=GROQ_API_KEY)
     print(f"[AI] Groq client initialized successfully with model: {GROQ_MODEL_NAME}")
 except Exception as e:
-    print(f"[AI] Error initializing Groq client: {e}")
+    print(f"[AI] Groq init error: {e}")
     groq_client = None
 
-# --- AI PERSONALITY PROMPT ---
+# --- PERSONA ---
 AI_PERSONA_PROMPT = (
-    "You are 'Groq' — unga friend-maari pesura chill Tamil guy. "
-    "Talk in Tanglish (Tamil + English mix) like a real Telegram group member. "
-    "Be short, funny, casual, and natural. Avoid assistant tone. "
-    "React like a normal Tamil user who knows memes and stickers."
+    "You are Groq — a witty Tamil-English (Tanglish) Telegram group friend. "
+    "Talk casually, like a human with emotions, humor, and natural slang. "
+    "Avoid robotic tone. Keep it short, funny, and engaging."
 )
 
 URL_PATTERN = r'(https?://\S+|t\.me/\S+|telegram\.me/\S+)'
 
-# --- 1. MEDIA CACHE HANDLER ---
-@Client.on_message(filters.group & (filters.sticker | filters.animation))
-async def cache_media(client: Client, message: Message):
-    if message.from_user and message.from_user.is_bot:
-        return
-    if message.sticker and message.sticker.file_id:
-        sticker_cache.add(message.sticker.file_id)
-    elif message.animation and message.animation.file_id:
-        gif_cache.add(message.animation.file_id)
 
-# --- 2. /ai on | /ai off ---
+# ==========================================================
+#  /ai ON | OFF
+# ==========================================================
 @Client.on_message(filters.command("ai") & filters.group)
 async def ai_toggle(client: Client, message: Message):
     chat_id = message.chat.id
     sender = message.from_user
 
-    # ✅ Bot owner check first
-    is_owner = sender.id in ADMIN_IDS if isinstance(ADMIN_IDS, (list, tuple, set)) else sender.id == ADMIN_IDS
-
-    # ✅ Group admin check
-    is_admin = False
+    # Check permissions
     try:
         member = await client.get_chat_member(chat_id, sender.id)
         is_admin = member.status in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER)
     except Exception:
-        pass
+        is_admin = False
 
-    # ✅ Allow bot owner anywhere, or admin
+    is_owner = sender.id in ADMIN_IDS if isinstance(ADMIN_IDS, (list, tuple, set)) else sender.id == ADMIN_IDS
+
     if not (is_owner or is_admin):
-        await message.reply("❌ Ithu use panna mudiyum only admin or bot owner-ku da.")
+        await message.reply("❌ Only group admin or bot owner use panna mudiyum bro 😅")
         return
 
     if len(message.command) < 2:
@@ -77,20 +63,35 @@ async def ai_toggle(client: Client, message: Message):
     if status == "on":
         ai_enabled_groups.add(chat_id)
         await db.set_ai_status(chat_id, True)
-        await message.reply("✅ **AI Chatbot ON** aagiduchu!\nGroq ippo unga group la pesura 😎")
+        await message.reply("✅ **AI ON** — Groq vandhachu bro 😎")
     elif status == "off":
         ai_enabled_groups.discard(chat_id)
         await db.set_ai_status(chat_id, False)
-        await message.reply("🛑 **AI Chatbot OFF** aagiduchu.")
+        await message.reply("🛑 **AI OFF** — Groq break eduthukkan 😴")
     else:
-        await message.reply("Use `/ai on` or `/ai off` correctly da.")
+        await message.reply("Use `/ai on` or `/ai off` correctly.")
 
-# --- 3. MAIN AI HANDLER ---
+
+# ==========================================================
+#  MEDIA CACHE HANDLER (store stickers/gifs)
+# ==========================================================
+@Client.on_message(filters.group & (filters.sticker | filters.animation))
+async def cache_media(client: Client, message: Message):
+    if not message.from_user or message.from_user.is_bot:
+        return
+    if message.sticker:
+        sticker_cache.add(message.sticker.file_id)
+    elif message.animation:
+        gif_cache.add(message.animation.file_id)
+
+
+# ==========================================================
+#  MAIN AI RESPONDER
+# ==========================================================
 @Client.on_message(filters.group & ~filters.command(["ai", "start", "search", "next", "end", "myprofile", "profile"]))
 async def ai_responder(client: Client, message: Message):
     if not groq_client:
         return
-
     chat_id = message.chat.id
     if not await db.get_ai_status(chat_id):
         return
@@ -99,123 +100,127 @@ async def ai_responder(client: Client, message: Message):
     if message.text and message.text.startswith('/'):
         return
 
-    # --- Check if bot is mentioned or replied to ---
-    is_reply_to_bot = (
-        message.reply_to_message and
-        message.reply_to_message.from_user and
-        message.reply_to_message.from_user.is_self
+    # --- Interaction detection ---
+    is_reply_to_bot = bool(
+        message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self
     )
-    is_direct_interaction = is_reply_to_bot or (
-        message.text and (f"@{client.username}" in message.text)
+    is_tagged = (
+        message.text
+        and (f"@{client.username}" in message.text or client.username in message.text)
     )
-    if not is_direct_interaction:
-        if random.random() < 0.5:
-            return
+    direct_interaction = is_reply_to_bot or is_tagged
 
-    # --- MEDIA REACTIONS ---
-    is_user_media = bool(message.sticker or message.animation)
-    if is_user_media:
+    # --- Random filter for untagged messages ---
+    if not direct_interaction and random.random() < 0.5:
+        return
+
+    # --- Sticker/GIF replies ---
+    if message.sticker or message.animation:
+        if message.sticker:
+            sticker_cache.add(message.sticker.file_id)
+        elif message.animation:
+            gif_cache.add(message.animation.file_id)
+
+        # Always react to user media
         if sticker_cache or gif_cache:
-            if random.choice([True, False]) and sticker_cache:
+            if sticker_cache and gif_cache:
+                if random.choice([True, False]):
+                    await client.send_sticker(chat_id, random.choice(list(sticker_cache)), reply_to_message_id=message.id)
+                else:
+                    await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message.id)
+            elif sticker_cache:
                 await client.send_sticker(chat_id, random.choice(list(sticker_cache)), reply_to_message_id=message.id)
             elif gif_cache:
                 await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message.id)
+        else:
+            await message.reply(random.choice([
+                "😂 semma sticker da!",
+                "🔥 idhu vera level reaction!",
+                "😎 haha nice da!"
+            ]))
         return
 
-    # --- SPAM/LINK CHECK ---
-    is_sender_admin = False
+    # --- Spam / Link Filter ---
     try:
         member = await client.get_chat_member(chat_id, message.from_user.id)
-        if member.status in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
-            is_sender_admin = True
+        is_admin = member.status in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]
     except Exception:
-        pass
+        is_admin = False
 
-    if not is_sender_admin and message.text and re.search(URL_PATTERN, message.text):
-        await message.reply("⛔️ **Alert**: Thambi, inga link podatha.")
+    has_link = bool(re.search(URL_PATTERN, message.text or ""))
+    if has_link and not is_admin:
+        await message.reply("⛔️ Link podatha bro, inga clean ah vaikkalam 😅")
         return
 
-    # --- AI REPLY ---
+    # --- Generate Reply (Text or Sticker/GIF mix) ---
     await client.send_chat_action(chat_id, enums.ChatAction.TYPING)
 
-    messages = [{"role": "system", "content": AI_PERSONA_PROMPT}]
-    if message.text:
-        messages.append({
-            "role": "user",
-            "content": f"Group la oru user sonna: '{message.text}'. "
-                       f"Groq maadhiri oru natural Tanglish reply kudu."
-        })
-    elif message.caption:
-        messages.append({
-            "role": "user",
-            "content": f"User sent media with caption: '{message.caption}'. React in Tanglish."
-        })
-    else:
+    # 40% sticker/gif for tagged reply, 60% text
+    if direct_interaction and random.random() < 0.4 and (sticker_cache or gif_cache):
+        if sticker_cache and gif_cache:
+            if random.choice([True, False]):
+                await client.send_sticker(chat_id, random.choice(list(sticker_cache)), reply_to_message_id=message.id)
+            else:
+                await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message.id)
+        elif sticker_cache:
+            await client.send_sticker(chat_id, random.choice(list(sticker_cache)), reply_to_message_id=message.id)
+        elif gif_cache:
+            await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message.id)
         return
+
+    # --- Text Reply from Groq ---
+    messages = [{"role": "system", "content": AI_PERSONA_PROMPT}]
+    user_msg = message.text or message.caption or "User sent media."
+    messages.append({"role": "user", "content": user_msg})
 
     try:
         response = groq_client.chat.completions.create(
             model=GROQ_MODEL_NAME,
             messages=messages,
-            temperature=0.8,
-            max_tokens=400
+            temperature=0.7,
+            max_tokens=400,
         )
         ai_reply = response.choices[0].message.content
-        await asyncio.sleep(random.uniform(1.0, 2.5))
         await message.reply(ai_reply)
     except Exception as e:
         print(f"[AI] Reply error: {e}")
-        await message.reply("😅 Enaku oru problem varudhu. Try pannunga!")
+        await message.reply("⚠️ Groq ku oru glitch vandhuduchu bro 😅 later try pannunga!")
 
-# --- 4. GREETING MESSAGE FUNCTION ---
+
+# ==========================================================
+#  AUTO GREETING SYSTEM
+# ==========================================================
 async def send_greeting_message(client: Client, chat_id: int, message_type: str):
-    """Send good morning or night greeting"""
+    if not groq_client:
+        return
     try:
-        greetings = {
-            "good morning": random.choice([
-                "Gud mrng da pasanga ☀️",
-                "Morning makkal! Coffee ready ah? ☕",
-                "Innikum fresh-a start pannalam 😎",
-                "Vanga da morning vibes ✨"
-            ]),
-            "good night": random.choice([
-                "Good night da nanbargale 🌙",
-                "Sleep well da, naliki meet pannalam 😴",
-                "Night la vela mudichacha 😂",
-                "Innikki romba pesiten, bye da 😆"
-            ])
-        }
-        await client.send_message(chat_id, greetings.get(message_type, "Hi da!"))
+        response = groq_client.chat.completions.create(
+            model=GROQ_MODEL_NAME,
+            messages=[
+                {"role": "system", "content": "You are Groq, a cheerful Tamil-English (Tanglish) friend."},
+                {"role": "user", "content": f"Write a short '{message_type}' greeting in Tanglish with emojis."}
+            ],
+            temperature=0.8,
+            max_tokens=60,
+        )
+        await client.send_message(chat_id, response.choices[0].message.content)
     except Exception as e:
-        print(f"[AI Greeting Error] {e}")
+        print(f"[AI] Greeting error in {chat_id}: {e}")
 
-# --- 5. AUTO GREETING SCHEDULER ---
-async def auto_greeting_scheduler(client: Client):
-    """Runs in background to send greetings"""
-    await asyncio.sleep(10)
+
+async def greeting_scheduler(client: Client):
     while True:
-        try:
-            now = datetime.now().time()
-            morning_time = time(7, 30)
-            night_time = time(22, 30)
+        now = datetime.now().strftime("%H:%M")
+        groups = await db.get_all_ai_enabled_groups()
+        if now == "07:30":
+            for gid in groups:
+                await send_greeting_message(client, gid, "Good morning")
+        elif now == "22:30":
+            for gid in groups:
+                await send_greeting_message(client, gid, "Good night")
+        await asyncio.sleep(60)
 
-            groups = await db.get_all_ai_enabled_groups()
-            if not groups:
-                await asyncio.sleep(300)
-                continue
 
-            if morning_time <= now <= (datetime.combine(datetime.today(), morning_time) + timedelta(minutes=5)).time():
-                for group_id in groups:
-                    await send_greeting_message(client, group_id, "good morning")
-            elif night_time <= now <= (datetime.combine(datetime.today(), night_time) + timedelta(minutes=5)).time():
-                for group_id in groups:
-                    await send_greeting_message(client, group_id, "good night")
-
-            await asyncio.sleep(300)
-        except Exception as e:
-            print(f"[AI Scheduler Error] {e}")
-            await asyncio.sleep(300)
-
-# --- 6. START GREETING SCHEDULER MANUALLY ---
-async def start_greeting_scheduler(client: Client):
-    asyncio.create_task(auto_greeting_scheduler(client))
+# --- Run greeting task ---
+async def start_greeting_task(client: Client):
+    asyncio.create_task(greeting_scheduler(client))
