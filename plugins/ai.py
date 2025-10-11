@@ -30,8 +30,9 @@ except Exception as e:
 # --- AI PERSONALITY PROMPT ---
 AI_PERSONA_PROMPT = (
     "You are 'Groq' — unga friend-maari pesura chill Tamil guy. "
-    "Talk in Tanglish (Tamil + English mix) like normal Telegram group members. "
-    "Be witty, short, natural, and human. Use casual Tamil slang but not too much."
+    "Talk in Tanglish (Tamil + English mix) like a real Telegram group member. "
+    "Be short, funny, casual, and natural. Avoid assistant tone. "
+    "React like a normal Tamil user who knows memes and stickers."
 )
 
 URL_PATTERN = r'(https?://\S+|t\.me/\S+|telegram\.me/\S+)'
@@ -52,15 +53,20 @@ async def ai_toggle(client: Client, message: Message):
     chat_id = message.chat.id
     sender = message.from_user
 
+    # ✅ Bot owner check first
+    is_owner = sender.id in ADMIN_IDS if isinstance(ADMIN_IDS, (list, tuple, set)) else sender.id == ADMIN_IDS
+
+    # ✅ Group admin check
+    is_admin = False
     try:
         member = await client.get_chat_member(chat_id, sender.id)
         is_admin = member.status in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER)
     except Exception:
-        is_admin = False
+        pass
 
-    is_owner = sender.id in ADMIN_IDS if isinstance(ADMIN_IDS, (list, tuple, set)) else sender.id == ADMIN_IDS
+    # ✅ Allow bot owner anywhere, or admin
     if not (is_owner or is_admin):
-        await message.reply("❌ Only admin or bot owner can use this.")
+        await message.reply("❌ Ithu use panna mudiyum only admin or bot owner-ku da.")
         return
 
     if len(message.command) < 2:
@@ -71,7 +77,7 @@ async def ai_toggle(client: Client, message: Message):
     if status == "on":
         ai_enabled_groups.add(chat_id)
         await db.set_ai_status(chat_id, True)
-        await message.reply("✅ **AI Chatbot ON** aagiduchu!\nNaanum ippo group la pesuren 😎")
+        await message.reply("✅ **AI Chatbot ON** aagiduchu!\nGroq ippo unga group la pesura 😎")
     elif status == "off":
         ai_enabled_groups.discard(chat_id)
         await db.set_ai_status(chat_id, False)
@@ -107,9 +113,7 @@ async def ai_responder(client: Client, message: Message):
             return
 
     # --- MEDIA REACTIONS ---
-    current_count = consecutive_media_count.get(chat_id, 0)
     is_user_media = bool(message.sticker or message.animation)
-
     if is_user_media:
         if sticker_cache or gif_cache:
             if random.choice([True, False]) and sticker_cache:
@@ -117,8 +121,6 @@ async def ai_responder(client: Client, message: Message):
             elif gif_cache:
                 await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message.id)
         return
-
-    consecutive_media_count[chat_id] = 0
 
     # --- SPAM/LINK CHECK ---
     is_sender_admin = False
@@ -140,7 +142,8 @@ async def ai_responder(client: Client, message: Message):
     if message.text:
         messages.append({
             "role": "user",
-            "content": f"Group member said: '{message.text}'. Respond casually and naturally in Tanglish."
+            "content": f"Group la oru user sonna: '{message.text}'. "
+                       f"Groq maadhiri oru natural Tanglish reply kudu."
         })
     elif message.caption:
         messages.append({
