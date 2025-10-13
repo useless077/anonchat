@@ -1,11 +1,15 @@
 # plugins/extra.py
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
 from config import ADMIN_IDS
 from database.users import db
 from utils import get_online_users_count
+
+# to store which chats have autodelete ON
+auto_delete_enabled = {}
+delete_delay = 3600  # 1 hour (in seconds)
 
 # --- BROADCAST COMMAND ---
 @Client.on_message(filters.private & filters.command("broadcast") & filters.user(ADMIN_IDS))
@@ -76,3 +80,44 @@ async def status_cmd(client: Client, message: Message):
     )
 
     await message.reply(status_text, parse_mode=enums.ParseMode.MARKDOWN)
+
+# --- Command: /autodelete on|off ---
+@Client.on_message(filters.command("autodelete") & filters.group)
+async def toggle_autodelete(client: Client, message: Message):
+    user = await client.get_chat_member(message.chat.id, message.from_user.id)
+    if not (user.status in ("administrator", "creator")):
+        return await message.reply("❌ Only admins can use this command.")
+
+    args = message.text.split(None, 1)
+    if len(args) == 1:
+        status = "ON ✅" if auto_delete_enabled.get(message.chat.id) else "OFF ❌"
+        return await message.reply(f"AutoDelete is currently **{status}**")
+
+    cmd = args[1].lower()
+    if cmd == "on":
+        auto_delete_enabled[message.chat.id] = True
+        await message.reply("🧹 AutoDelete enabled! All media (except text & voice) will be deleted after 1 hour.")
+    elif cmd == "off":
+        auto_delete_enabled.pop(message.chat.id, None)
+        await message.reply("🧹 AutoDelete disabled.")
+    else:
+        await message.reply("Usage: `/autodelete on` or `/autodelete off`", quote=True)
+
+
+# --- Watch all group messages ---
+@Client.on_message(filters.group, group=99)
+async def auto_delete_media(client: Client, message: Message):
+    chat_id = message.chat.id
+    if not auto_delete_enabled.get(chat_id):
+        return  # autodelete off for this group
+
+    # Exclude text & voice
+    if message.text or message.voice:
+        return
+
+    # Delete after 1 hour
+    try:
+        await asyncio.sleep(delete_delay)
+        await client.delete_messages(chat_id, message.id)
+    except Exception:
+        pass
