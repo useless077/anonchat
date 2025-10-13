@@ -11,3 +11,8 @@ schedule>=1.1.0
 TgCrypto
 flask
 uvicorn
+instagrapi>=1.19.2
+google-api-python-client>=2.94.0
+google-auth>=2.21.0
+google-auth-oauthlib>=1.2.0
+aiofiles
