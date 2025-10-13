@@ -4,6 +4,7 @@ import json
 import asyncio
 import logging
 from datetime import datetime, timedelta
+from urllib.parse import urlparse, parse_qs
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
 from instagrapi import Client as InstaClient
@@ -28,6 +29,7 @@ YT_CLIENT_SECRETS_FILE = "sessions/yt_client_secret.json"
 insta_client = None
 yt_service = None
 yt_credentials = None
+yt_flow = None
 
 # --- Helper Functions ---
 def check_yt_credentials():
@@ -62,9 +64,14 @@ def check_insta_session():
     try:
         insta_client = InstaClient()
         insta_client.load_settings(INSTA_SESSION_FILE)
-        # Test if session is still valid
-        insta_client.get_timeline_feed()
-        return True
+        # Test if session is still valid by checking user info
+        user_info = insta_client.user_info(insta_client.user_id)
+        if user_info:
+            logger.info(f"Instagram session valid for user: {user_info.username}")
+            return True
+        else:
+            logger.warning("Instagram session exists but user info is invalid")
+            return False
     except Exception as e:
         logger.error(f"Error checking Instagram session: {e}")
         return False
@@ -120,34 +127,53 @@ async def insta_post(client: Client, message: Message):
         return
 
     caption = " ".join(message.command[1:]) if len(message.command) > 1 else ""
-    file = await message.reply_to_message.download()
-    await message.reply("📤 Uploading video to Instagram...")
-
-    max_retries = 3
-    retry_count = 0
+    file_path = None
     
-    while retry_count < max_retries:
-        try:
-            insta_client.video_upload(file, caption=caption, cover=None, reels=True)
-            await message.reply("✅ Video posted to Instagram Reels successfully!")
-            break
-        except Exception as e:
-            retry_count += 1
-            logger.error(f"Instagram upload attempt {retry_count} failed: {e}")
-            if retry_count >= max_retries:
-                await message.reply(f"❌ Failed to post to Instagram after {max_retries} attempts: {e}")
-            else:
-                await message.reply(f"⚠️ Upload attempt {retry_count} failed. Retrying...")
-                await asyncio.sleep(2)
-    finally:
-        if os.path.exists(file):
-            os.remove(file)
+    try:
+        file_path = await message.reply_to_message.download()
+        await message.reply("📤 Uploading video to Instagram...")
 
-# --- 3️⃣ YouTube login ---
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                # Check if session is still valid before uploading
+                if not check_insta_session():
+                    await message.reply("⚠️ Instagram session expired. Please run /insta_login again.")
+                    break
+                
+                insta_client.video_upload(file_path, caption=caption, cover=None, reels=True)
+                await message.reply("✅ Video posted to Instagram Reels successfully!")
+                break
+            except Exception as e:
+                retry_count += 1
+                error_msg = str(e)
+                logger.error(f"Instagram upload attempt {retry_count} failed: {error_msg}")
+                
+                # Check for specific error messages
+                if "challenge_required" in error_msg:
+                    await message.reply("⚠️ Instagram requires verification. Please check your Instagram app and complete the verification.")
+                    break
+                elif "login_required" in error_msg:
+                    await message.reply("⚠️ Instagram login expired. Please run /insta_login again.")
+                    break
+                
+                if retry_count >= max_retries:
+                    await message.reply(f"❌ Failed to post to Instagram after {max_retries} attempts: {error_msg}")
+                else:
+                    await message.reply(f"⚠️ Upload attempt {retry_count} failed. Retrying...")
+                    await asyncio.sleep(2)
+    finally:
+        # Ensure the downloaded file is always removed
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+
+# --- 3️⃣ YouTube login (Server-friendly version) ---
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 @Client.on_message(filters.command("yt_login") & filters.user(ADMIN_IDS))
 async def yt_login(client: Client, message: Message):
-    global yt_service, yt_credentials
+    global yt_service, yt_credentials, yt_flow
     await message.reply("📲 Initiating YouTube login process...")
     
     try:
@@ -165,19 +191,18 @@ async def yt_login(client: Client, message: Message):
             return
 
         # If no valid credentials, start OAuth flow
-        await message.reply("🔗 Please complete the OAuth flow in your browser...")
+        await message.reply("🔗 Please complete the OAuth flow...")
         
-        # Use a more server-friendly approach
+        # Use out-of-band (oob) flow for server environments
         flow = Flow.from_client_secrets_file(YT_CLIENT_SECRETS_FILE, SCOPES)
-        flow.redirect_uri = "http://localhost:8080/"
+        flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
         
         auth_url, _ = flow.authorization_url(prompt='consent')
-        await message.reply(f"🌐 Please visit this URL to authorize the application: {auth_url}")
-        await message.reply("⏳ After authorizing, you'll be redirected to a page with a code in the URL.")
-        await message.reply("📝 Please copy the full URL and send it back to me with /yt_code command.")
+        await message.reply(f"🌐 Please visit this URL to authorize the application:\n\n{auth_url}")
+        await message.reply("⏳ After authorizing, you will be given a code.")
+        await message.reply("📝 Please copy the code and send it back to me with the /yt_code command.")
         
         # Store the flow for later use in yt_code command
-        global yt_flow
         yt_flow = flow
         
     except Exception as e:
@@ -194,22 +219,13 @@ async def yt_code(client: Client, message: Message):
         return
     
     try:
-        # Extract the code from the URL
+        # Extract the code from the message
         if len(message.command) < 2:
-            await message.reply("❌ Please provide the authorization code or full URL.")
+            await message.reply("❌ Please provide the authorization code you received.")
             return
             
-        auth_response = message.command[1]
-        if "http" in auth_response:
-            # Extract code from URL
-            from urllib.parse import urlparse, parse_qs
-            parsed_url = urlparse(auth_response)
-            code = parse_qs(parsed_url.query).get('code', [None])[0]
-            if not code:
-                await message.reply("❌ Could not extract authorization code from URL.")
-                return
-        else:
-            code = auth_response
+        # The code should be the second part of the command
+        code = message.command[1]
         
         yt_flow.fetch_token(code=code)
         yt_credentials = yt_flow.credentials
@@ -241,6 +257,7 @@ async def yt_post(client: Client, message: Message):
         await message.reply("❌ Reply to a Telegram video to post on YouTube.")
         return
 
+    file_path = None
     try:
         # Parse command arguments
         cmd_text = " ".join(message.command[1:])
@@ -262,10 +279,10 @@ async def yt_post(client: Client, message: Message):
         if len(parts) >= 4 and parts[3]:
             tags = [tag.strip() for tag in parts[3].split(",")]
         
-        file = await message.reply_to_message.download()
+        file_path = await message.reply_to_message.download()
         await message.reply(f"📤 Uploading video to YouTube with title: '{title}'...")
 
-        media = MediaFileUpload(file, resumable=True)
+        media = MediaFileUpload(file_path, resumable=True)
         request = yt_service.videos().insert(
             part="snippet,status",
             body={
@@ -294,8 +311,9 @@ async def yt_post(client: Client, message: Message):
         logger.error(f"YouTube upload failed: {e}")
         await message.reply(f"❌ Failed to post to YouTube: {e}")
     finally:
-        if 'file' in locals() and os.path.exists(file):
-            os.remove(file)
+        # Ensure the downloaded file is always removed
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
 
 # --- 5️⃣ Status command ---
 @Client.on_message(filters.command("social_status") & filters.user(ADMIN_IDS))
@@ -316,3 +334,41 @@ async def social_status(client: Client, message: Message):
         status_text += "📺 YouTube: ❌ Not logged in\n"
     
     await message.reply(status_text)
+
+# --- 6️⃣ Clear sessions command ---
+@Client.on_message(filters.command("clear_sessions") & filters.user(ADMIN_IDS))
+async def clear_sessions(client: Client, message: Message):
+    """Clear all stored social media sessions."""
+    try:
+        # Clear Instagram session
+        if os.path.exists(INSTA_SESSION_FILE):
+            os.remove(INSTA_SESSION_FILE)
+            insta_msg = "✅ Instagram session cleared."
+        else:
+            insta_msg = "ℹ️ No Instagram session found."
+        
+        # Clear YouTube token
+        if os.path.exists(YT_TOKEN_FILE):
+            os.remove(YT_TOKEN_FILE)
+            yt_msg = "✅ YouTube token cleared."
+        else:
+            yt_msg = "ℹ️ No YouTube token found."
+        
+        # Clear YouTube client secrets
+        if os.path.exists(YT_CLIENT_SECRETS_FILE):
+            os.remove(YT_CLIENT_SECRETS_FILE)
+            secrets_msg = "✅ YouTube client secrets cleared."
+        else:
+            secrets_msg = "ℹ️ No YouTube client secrets found."
+        
+        # Reset global variables
+        global insta_client, yt_service, yt_credentials, yt_flow
+        insta_client = None
+        yt_service = None
+        yt_credentials = None
+        yt_flow = None
+        
+        await message.reply(f"🧹 Session cleanup complete:\n\n{insta_msg}\n{yt_msg}\n{secrets_msg}")
+    except Exception as e:
+        logger.error(f"Error clearing sessions: {e}")
+        await message.reply(f"❌ Failed to clear sessions: {e}")
