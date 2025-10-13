@@ -83,17 +83,21 @@ async def status_cmd(client: Client, message: Message):
 @Client.on_message(filters.command("autodelete", prefixes=["/", "!"]) & filters.group)
 async def toggle_autodelete(client: Client, message: Message):
     try:
+        print(f"[AutoDelete] Command received in chat {message.chat.id} by user {message.from_user.id}")
+        
         # Check if user is admin
         user = await client.get_chat_member(message.chat.id, message.from_user.id)
         if not (user.status in ("administrator", "creator")):
+            print(f"[AutoDelete] User {message.from_user.id} is not an admin")
             return await message.reply("❌ Only admins can use this command.")
 
         # Check bot delete permission
         bot_member = await client.get_chat_member(message.chat.id, client.me.id)
         if not bot_member.privileges or not bot_member.privileges.can_delete_messages:
+            print(f"[AutoDelete] Bot doesn't have delete permission in chat {message.chat.id}")
             return await message.reply(
                 "⚠️ **ɪ ᴅᴏɴ'ᴛ ʜᴀᴠᴇ ᴘᴇʀᴍɪꜱꜱɪᴏɴ ᴛᴏ ᴅᴇʟᴇᴛᴇ ᴍᴇꜱꜱᴀɢᴇꜱ ɪɴ ᴛʜɪꜱ ɢʀᴏᴜᴘ.**\n\n"
-                "🛠️ **ᴘʟᴇᴀꜱᴇ ɢɪᴠᴇ ᴍᴇ ᴛʜᴇ ‘ᴅᴇʟᴇᴛᴇ ᴍᴇꜱꜱᴀɢᴇꜱ’ ᴘᴇʀᴍɪꜱꜱɪᴏɴ ᴀɴᴅ ᴛʀʏ ᴀɢᴀɪɴ.**"
+                "🛠️ **ᴘʟᴇᴀꜱᴇ ɢɪᴠᴇ ᴍᴇ ᴛʜᴇ 'ᴅᴇʟᴇᴛᴇ ᴍᴇꜱꜱᴀɢᴇꜱ' ᴘᴇʀᴍɪꜱꜱɪᴏɴ ᴀɴᴅ ᴛʀʏ ᴀɢᴀɪɴ.**"
             )
 
         # Parse command argument safely
@@ -102,22 +106,37 @@ async def toggle_autodelete(client: Client, message: Message):
 
         if not cmd_arg:
             # --- CHANGE: Check status from database ---
-            status = await db.get_autodelete_status(message.chat.id)
-            status_text = "ON ✅" if status else "OFF ❌"
-            return await message.reply(f"AutoDelete is currently **{status_text}**")
+            try:
+                status = await db.get_autodelete_status(message.chat.id)
+                status_text = "ON ✅" if status else "OFF ❌"
+                print(f"[AutoDelete] Current status for chat {message.chat.id}: {status}")
+                return await message.reply(f"AutoDelete is currently **{status_text}**")
+            except Exception as e:
+                print(f"[AutoDelete] Error getting status: {e}")
+                return await message.reply(f"❌ Error checking autodelete status: {e}")
 
         if cmd_arg == "on":
             # --- CHANGE: Save status to database ---
-            await db.set_autodelete(message.chat.id, True)
-            return await message.reply(
-                "🧹 AutoDelete **enabled!**\n\n"
-                "All media (except text & voice) will be deleted after **1 hour.**"
-            )
+            try:
+                await db.set_autodelete(message.chat.id, True)
+                print(f"[AutoDelete] Enabled for chat {message.chat.id}")
+                return await message.reply(
+                    "🧹 AutoDelete **enabled!**\n\n"
+                    "All media (except text & voice) will be deleted after **1 hour.**"
+                )
+            except Exception as e:
+                print(f"[AutoDelete] Error enabling: {e}")
+                return await message.reply(f"❌ Error enabling autodelete: {e}")
 
         elif cmd_arg == "off":
             # --- CHANGE: Save status to database ---
-            await db.set_autodelete(message.chat.id, False)
-            return await message.reply("🧹 AutoDelete **disabled.**")
+            try:
+                await db.set_autodelete(message.chat.id, False)
+                print(f"[AutoDelete] Disabled for chat {message.chat.id}")
+                return await message.reply("🧹 AutoDelete **disabled.**")
+            except Exception as e:
+                print(f"[AutoDelete] Error disabling: {e}")
+                return await message.reply(f"❌ Error disabling autodelete: {e}")
 
         else:
             return await message.reply("Usage: `/autodelete on` or `/autodelete off`", quote=True)
@@ -133,8 +152,13 @@ async def auto_delete_media(client: Client, message: Message):
     chat_id = message.chat.id
     
     # --- CHANGE: Check status from database ---
-    if not await db.get_autodelete_status(chat_id):
-        return  # autodelete off for this group
+    try:
+        status = await db.get_autodelete_status(chat_id)
+        if not status:
+            return  # autodelete off for this group
+    except Exception as e:
+        print(f"[AutoDelete] Error checking status in auto_delete_media: {e}")
+        return  # If we can't check status, assume autodelete is off
 
     # Exclude text & voice messages
     if message.text or message.voice:
@@ -145,6 +169,7 @@ async def auto_delete_media(client: Client, message: Message):
         return
 
     try:
+        print(f"[AutoDelete] Scheduling deletion for message {message.id} in chat {chat_id}")
         # Schedule deletion after delay
         await asyncio.sleep(delete_delay)
         await client.delete_messages(chat_id, message.id)
