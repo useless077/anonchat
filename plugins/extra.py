@@ -80,7 +80,7 @@ async def status_cmd(client: Client, message: Message):
     await message.reply(status_text, parse_mode=enums.ParseMode.MARKDOWN)
 
 # --- Command: /autodelete on|off (UPDATED) ---
-@Client.on_message(filters.command("autodelete", prefixes=["/", "!"]) & filters.group)
+@Client.on_message(filters.command("autodelete") & filters.group)
 async def toggle_autodelete(client: Client, message: Message):
     try:
         print(f"[AutoDelete] Command received in chat {message.chat.id} by user {message.from_user.id}")
@@ -147,7 +147,7 @@ async def toggle_autodelete(client: Client, message: Message):
 
 
 # --- AUTO DELETE MEDIA HANDLER (UPDATED) ---
-@Client.on_message(filters.group, group=99)
+@Client.on_message(filters.group & ~filters.command(["autodelete"]), group=99)
 async def auto_delete_media(client: Client, message: Message):
     chat_id = message.chat.id
     
