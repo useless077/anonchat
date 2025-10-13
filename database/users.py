@@ -8,6 +8,8 @@ class Database:
         self.client = AsyncIOMotorClient(mongo_uri)
         self.db = self.client[db_name]
         self.users = self.db["users"]
+        # NOTE: This collection now stores more than just AI settings.
+        # Consider renaming it to "group_settings" in the future for clarity.
         self.ai_settings = self.db["ai_settings"] 
 
     # ------------------- Connection -------------------
@@ -103,7 +105,7 @@ class Database:
         print(f"Failed to set partners after {max_retries} attempts.")
         raise OperationFailure("Could not complete partner pairing after multiple retries.")
 
-    # ------------------- Group Settings (AI) -------------------
+    # ------------------- Group Settings (AI & AutoDelete) -------------------
     async def get_ai_status(self, chat_id: int) -> bool:
         """Checks if AI is enabled for a specific group using _id as the key."""
         settings = await self.ai_settings.find_one({"_id": chat_id})
@@ -124,6 +126,20 @@ class Database:
         chats = self.ai_settings.find({"ai_enabled": True}, {"_id": 1})
         return [chat["_id"] async for chat in chats]
 
+    # --- NEW METHODS FOR AUTODELETE ---
+    async def set_autodelete(self, chat_id: int, status: bool):
+        """Enables or disables AutoDelete for a specific group."""
+        await self.ai_settings.update_one(
+            {"_id": chat_id},
+            {"$set": {"autodelete_enabled": status}},
+            upsert=True
+        )
+
+    async def get_autodelete_status(self, chat_id: int) -> bool:
+        """Checks if AutoDelete is enabled for a specific group."""
+        settings = await self.ai_settings.find_one({"_id": chat_id})
+        return settings.get("autodelete_enabled", False) if settings else False
+
     # ------------------- Statistics -------------------
     async def get_total_users(self):
         """Returns the total number of private users (positive IDs)."""
@@ -141,6 +157,7 @@ class Database:
         """Returns a list of all private user IDs."""
         users = self.users.find({"_id": {"$gt": 0}, "type": "user"}, {"_id": 1})
         return [user["_id"] async for user in users]
+
 
 # ------------------- Shared instance -------------------
 db = Database(MONGO_URI, MONGO_DB_NAME)
