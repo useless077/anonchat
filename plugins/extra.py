@@ -88,10 +88,12 @@ async def toggle_autodelete(client: Client, message: Message):
     try:
         print("[AutoDelete Command] Checking if user is admin...")
         user = await client.get_chat_member(message.chat.id, message.from_user.id)
-        if not (user.status in ("administrator", "creator")):
-            print(f"[AutoDelete Command] User {message.from_user.id} is NOT an admin.")
+        
+        # Use Pyrogram enums for more reliable admin status checking
+        if user.status not in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER):
+            print(f"[AutoDelete Command] User {message.from_user.id} is NOT an admin. Status: {user.status}")
             return await message.reply("❌ Only admins can use this command.")
-        print(f"[AutoDelete Command] User {message.from_user.id} is an admin. OK.")
+        print(f"[AutoDelete Command] User {message.from_user.id} is an admin. Status: {user.status}. OK.")
 
         print("[AutoDelete Command] Checking bot's own permissions...")
         bot_member = await client.get_chat_member(message.chat.id, client.me.id)
