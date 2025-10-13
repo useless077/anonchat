@@ -88,6 +88,14 @@ async def toggle_autodelete(client: Client, message: Message):
     if not (user.status in ("administrator", "creator")):
         return await message.reply("❌ Only admins can use this command.")
 
+    # Check bot permissions first
+    bot_member = await client.get_chat_member(message.chat.id, client.me.id)
+    if not bot_member.privileges or not bot_member.privileges.can_delete_messages:
+        return await message.reply(
+            "⚠️ **ɪ ᴅᴏɴ'ᴛ ʜᴀᴠᴇ ᴘᴇʀᴍɪꜱꜱɪᴏɴ ᴛᴏ ᴅᴇʟᴇᴛᴇ ᴍᴇꜱꜱᴀɢᴇꜱ ɪɴ ᴛʜɪꜱ ɢʀᴏᴜᴘ.**\n\n"
+            "🛠️ **ᴘʟᴇᴀꜱᴇ ɢɪᴠᴇ ᴍᴇ ᴛʜᴇ ‘ᴅᴇʟᴇᴛᴇ ᴍᴇꜱꜱᴀɢᴇꜱ’ ᴘᴇʀᴍɪꜱꜱɪᴏɴ ᴀɴᴅ ᴛʀʏ ᴀɢᴀɪɴ.**"
+        )
+
     args = message.text.split(None, 1)
     if len(args) == 1:
         status = "ON ✅" if auto_delete_enabled.get(message.chat.id) else "OFF ❌"
@@ -96,15 +104,16 @@ async def toggle_autodelete(client: Client, message: Message):
     cmd = args[1].lower()
     if cmd == "on":
         auto_delete_enabled[message.chat.id] = True
-        await message.reply("🧹 AutoDelete enabled! All media (except text & voice) will be deleted after 1 hour.")
+        await message.reply("🧹 AutoDelete **enabled!** All media (except text & voice) will be deleted after **1 hour.**")
     elif cmd == "off":
         auto_delete_enabled.pop(message.chat.id, None)
-        await message.reply("🧹 AutoDelete disabled.")
+        await message.reply("🧹 AutoDelete **disabled.**")
     else:
         await message.reply("Usage: `/autodelete on` or `/autodelete off`", quote=True)
 
 
-# --- Watch all group messages ---
+
+# --- AUTO DELETE MEDIA HANDLER ---
 @Client.on_message(filters.group, group=99)
 async def auto_delete_media(client: Client, message: Message):
     chat_id = message.chat.id
@@ -115,9 +124,17 @@ async def auto_delete_media(client: Client, message: Message):
     if message.text or message.voice:
         return
 
-    # Delete after 1 hour
     try:
+        # Check bot's permissions
+        bot_member = await client.get_chat_member(chat_id, (await client.get_me()).id)
+        if not bot_member.can_delete_messages:
+            print(f"[AutoDelete] ❌ Bot has no delete permission in chat {chat_id}")
+            return
+
+        # Delay before deletion
         await asyncio.sleep(delete_delay)
         await client.delete_messages(chat_id, message.id)
-    except Exception:
-        pass
+        print(f"[AutoDelete] 🧹 Deleted message {message.id} from chat {chat_id}")
+
+    except Exception as e:
+        print(f"[AutoDelete] Error deleting message: {e}")
