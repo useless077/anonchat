@@ -7,8 +7,6 @@ from config import ADMIN_IDS
 from database.users import db
 from utils import get_online_users_count
 
-# to store which chats have autodelete ON
-auto_delete_enabled = {}
 delete_delay = 3600  # 1 hour (in seconds)
 
 # --- BROADCAST COMMAND ---
@@ -81,7 +79,7 @@ async def status_cmd(client: Client, message: Message):
 
     await message.reply(status_text, parse_mode=enums.ParseMode.MARKDOWN)
 
-# --- Command: /autodelete on|off ---
+# --- Command: /autodelete on|off (UPDATED) ---
 @Client.on_message(filters.command("autodelete", prefixes=["/", "!"]) & filters.group)
 async def toggle_autodelete(client: Client, message: Message):
     try:
@@ -103,18 +101,22 @@ async def toggle_autodelete(client: Client, message: Message):
         cmd_arg = text_parts[1].lower() if len(text_parts) > 1 else None
 
         if not cmd_arg:
-            status = "ON ✅" if auto_delete_enabled.get(message.chat.id) else "OFF ❌"
-            return await message.reply(f"AutoDelete is currently **{status}**")
+            # --- CHANGE: Check status from database ---
+            status = await db.get_autodelete_status(message.chat.id)
+            status_text = "ON ✅" if status else "OFF ❌"
+            return await message.reply(f"AutoDelete is currently **{status_text}**")
 
         if cmd_arg == "on":
-            auto_delete_enabled[message.chat.id] = True
+            # --- CHANGE: Save status to database ---
+            await db.set_autodelete(message.chat.id, True)
             return await message.reply(
                 "🧹 AutoDelete **enabled!**\n\n"
                 "All media (except text & voice) will be deleted after **1 hour.**"
             )
 
         elif cmd_arg == "off":
-            auto_delete_enabled.pop(message.chat.id, None)
+            # --- CHANGE: Save status to database ---
+            await db.set_autodelete(message.chat.id, False)
             return await message.reply("🧹 AutoDelete **disabled.**")
 
         else:
@@ -125,28 +127,29 @@ async def toggle_autodelete(client: Client, message: Message):
         await message.reply("⚠️ Something went wrong while processing this command.")
 
 
-# --- AUTO DELETE MEDIA HANDLER ---
+# --- AUTO DELETE MEDIA HANDLER (UPDATED) ---
 @Client.on_message(filters.group, group=99)
 async def auto_delete_media(client: Client, message: Message):
     chat_id = message.chat.id
-    if not auto_delete_enabled.get(chat_id):
+    
+    # --- CHANGE: Check status from database ---
+    if not await db.get_autodelete_status(chat_id):
         return  # autodelete off for this group
 
-    # Exclude text & voice
+    # Exclude text & voice messages
     if message.text or message.voice:
         return
 
-    try:
-        # Check bot's permissions
-        bot_member = await client.get_chat_member(chat_id, (await client.get_me()).id)
-        if not bot_member.can_delete_messages:
-            print(f"[AutoDelete] ❌ Bot has no delete permission in chat {chat_id}")
-            return
+    # Also exclude service messages (like user joined, left, etc.)
+    if message.service:
+        return
 
-        # Delay before deletion
+    try:
+        # Schedule deletion after delay
         await asyncio.sleep(delete_delay)
         await client.delete_messages(chat_id, message.id)
         print(f"[AutoDelete] 🧹 Deleted message {message.id} from chat {chat_id}")
 
     except Exception as e:
-        print(f"[AutoDelete] Error deleting message: {e}")
+        # This can happen if the message was already deleted or bot was kicked
+        print(f"[AutoDelete] Error deleting message {message.id} in chat {chat_id}: {e}")
