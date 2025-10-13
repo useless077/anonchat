@@ -88,7 +88,7 @@ async def cache_media(client: Client, message: Message):
 # ==========================================================
 #  MAIN AI RESPONDER
 # ==========================================================
-@Client.on_message(filters.group & ~filters.command(["ai", "start", "search", "next", "end", "myprofile", "profile"]))
+@Client.on_message(filters.group & ~filters.command(["ai", "autodelete", "start", "search", "next", "end", "myprofile", "profile"]))
 async def ai_responder(client: Client, message: Message):
     if not groq_client:
         return
