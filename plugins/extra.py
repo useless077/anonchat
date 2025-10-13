@@ -82,35 +82,47 @@ async def status_cmd(client: Client, message: Message):
     await message.reply(status_text, parse_mode=enums.ParseMode.MARKDOWN)
 
 # --- Command: /autodelete on|off ---
-@Client.on_message(filters.command("autodelete") & filters.group)
+@Client.on_message(filters.command("autodelete", prefixes=["/", "!"]) & filters.group)
 async def toggle_autodelete(client: Client, message: Message):
-    user = await client.get_chat_member(message.chat.id, message.from_user.id)
-    if not (user.status in ("administrator", "creator")):
-        return await message.reply("❌ Only admins can use this command.")
+    try:
+        # Check if user is admin
+        user = await client.get_chat_member(message.chat.id, message.from_user.id)
+        if not (user.status in ("administrator", "creator")):
+            return await message.reply("❌ Only admins can use this command.")
 
-    # Check bot permissions first
-    bot_member = await client.get_chat_member(message.chat.id, client.me.id)
-    if not bot_member.privileges or not bot_member.privileges.can_delete_messages:
-        return await message.reply(
-            "⚠️ **ɪ ᴅᴏɴ'ᴛ ʜᴀᴠᴇ ᴘᴇʀᴍɪꜱꜱɪᴏɴ ᴛᴏ ᴅᴇʟᴇᴛᴇ ᴍᴇꜱꜱᴀɢᴇꜱ ɪɴ ᴛʜɪꜱ ɢʀᴏᴜᴘ.**\n\n"
-            "🛠️ **ᴘʟᴇᴀꜱᴇ ɢɪᴠᴇ ᴍᴇ ᴛʜᴇ ‘ᴅᴇʟᴇᴛᴇ ᴍᴇꜱꜱᴀɢᴇꜱ’ ᴘᴇʀᴍɪꜱꜱɪᴏɴ ᴀɴᴅ ᴛʀʏ ᴀɢᴀɪɴ.**"
-        )
+        # Check bot delete permission
+        bot_member = await client.get_chat_member(message.chat.id, client.me.id)
+        if not bot_member.privileges or not bot_member.privileges.can_delete_messages:
+            return await message.reply(
+                "⚠️ **ɪ ᴅᴏɴ'ᴛ ʜᴀᴠᴇ ᴘᴇʀᴍɪꜱꜱɪᴏɴ ᴛᴏ ᴅᴇʟᴇᴛᴇ ᴍᴇꜱꜱᴀɢᴇꜱ ɪɴ ᴛʜɪꜱ ɢʀᴏᴜᴘ.**\n\n"
+                "🛠️ **ᴘʟᴇᴀꜱᴇ ɢɪᴠᴇ ᴍᴇ ᴛʜᴇ ‘ᴅᴇʟᴇᴛᴇ ᴍᴇꜱꜱᴀɢᴇꜱ’ ᴘᴇʀᴍɪꜱꜱɪᴏɴ ᴀɴᴅ ᴛʀʏ ᴀɢᴀɪɴ.**"
+            )
 
-    args = message.text.split(None, 1)
-    if len(args) == 1:
-        status = "ON ✅" if auto_delete_enabled.get(message.chat.id) else "OFF ❌"
-        return await message.reply(f"AutoDelete is currently **{status}**")
+        # Parse command argument safely
+        text_parts = message.text.split()
+        cmd_arg = text_parts[1].lower() if len(text_parts) > 1 else None
 
-    cmd = args[1].lower()
-    if cmd == "on":
-        auto_delete_enabled[message.chat.id] = True
-        await message.reply("🧹 AutoDelete **enabled!** All media (except text & voice) will be deleted after **1 hour.**")
-    elif cmd == "off":
-        auto_delete_enabled.pop(message.chat.id, None)
-        await message.reply("🧹 AutoDelete **disabled.**")
-    else:
-        await message.reply("Usage: `/autodelete on` or `/autodelete off`", quote=True)
+        if not cmd_arg:
+            status = "ON ✅" if auto_delete_enabled.get(message.chat.id) else "OFF ❌"
+            return await message.reply(f"AutoDelete is currently **{status}**")
 
+        if cmd_arg == "on":
+            auto_delete_enabled[message.chat.id] = True
+            return await message.reply(
+                "🧹 AutoDelete **enabled!**\n\n"
+                "All media (except text & voice) will be deleted after **1 hour.**"
+            )
+
+        elif cmd_arg == "off":
+            auto_delete_enabled.pop(message.chat.id, None)
+            return await message.reply("🧹 AutoDelete **disabled.**")
+
+        else:
+            return await message.reply("Usage: `/autodelete on` or `/autodelete off`", quote=True)
+
+    except Exception as e:
+        print(f"[AutoDelete] Error in toggle_autodelete: {e}")
+        await message.reply("⚠️ Something went wrong while processing this command.")
 
 
 # --- AUTO DELETE MEDIA HANDLER ---
