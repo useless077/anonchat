@@ -167,6 +167,28 @@ async def auto_delete_media(client: Client, message: Message):
     # Create a background task for deletion. This is non-blocking.
     asyncio.create_task(_delete_message_after_delay(client, chat_id, message.id))
 
+# --- AUTO DELETE BOT'S OWN MEDIA HANDLER ---
+@Client.on_message(filters.group & filters.media & filters.outgoing, group=98)
+async def auto_delete_bot_media(client: Client, message: Message):
+    # THIS IS THE CANARY LOG FOR THE BOT'S MEDIA HANDLER
+    print(f"[AutoDelete Bot Media] 🔥🔥 BOT MEDIA HANDLER TRIGGERED! Message ID: {message.id} in chat {message.chat.id}")
+
+    chat_id = message.chat.id
+    
+    print(f"[AutoDelete Bot Media] Checking autodelete status for chat {chat_id}...")
+    try:
+        status = await db.get_autodelete_status(chat_id)
+        if not status:
+            print(f"[AutoDelete Bot Media] Autodelete is OFF for chat {chat_id}. Ignoring message.")
+            return  # autodelete is off for this group
+    except Exception as e:
+        print(f"[AutoDelete Bot Media] ❌ ERROR checking status for chat {chat_id}: {e}")
+        return
+
+    print(f"[AutoDelete Bot Media] Autodelete is ON for chat {chat_id}. Scheduling deletion for message {message.id}.")
+    
+    # Create a background task for deletion. This is non-blocking.
+    asyncio.create_task(_delete_message_after_delay(client, chat_id, message.id))
 
 # --- HELPER FUNCTION FOR DELETION ---
 async def _delete_message_after_delay(client: Client, chat_id: int, message_id: int):
