@@ -12,7 +12,7 @@ from config import GROQ_API_KEY, ADMIN_IDS
 from database.users import db
 
 # --- MODEL NAME ---
-GROQ_MODEL_NAME = "llama3-70b-8192"
+GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
 
 # --- GLOBAL STATE ---
 ai_enabled_groups = set()
