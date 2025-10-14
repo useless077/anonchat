@@ -52,6 +52,24 @@ def to_fancy_font(text: str) -> str:
         fancy_text.append(FANCY_FONT_MAP.get(char, char))
     return "".join(fancy_text)
 
+def remove_emojis(text: str) -> str:
+    """Remove emojis from bot's responses only (not user messages)."""
+    emoji_pattern = re.compile(
+        "["
+        "\U0001F600-\U0001F64F"  # emoticons
+        "\U0001F300-\U0001F5FF"  # symbols & pictographs
+        "\U0001F680-\U0001F6FF"  # transport & map symbols
+        "\U0001F1E0-\U0001F1FF"  # flags (iOS)
+        "\U00002702-\U000027B0"
+        "\U000024C2-\U0001F251"
+        "]+",
+        flags=re.UNICODE,
+    )
+    return emoji_pattern.sub(r'', text).strip()
+
+def should_use_emojis() -> bool:
+    """Randomly decide if emojis should be used (30-40% chance)."""
+    return random.random() < 0.35  # 35% chance
 
 # ==========================================================
 #  /ai ON | OFF (OWNER ONLY)
@@ -83,7 +101,6 @@ async def ai_toggle(client: Client, message: Message):
     else:
         await message.reply("Use `/ai on` or `/ai off` correctly.")
 
-
 # ==========================================================
 #  NEW MEMBER WELCOME HANDLER
 # ==========================================================
@@ -99,10 +116,36 @@ async def welcome_new_member(client: Client, message: Message):
     if not new_users:
         return
 
-    welcome_text = "Hyy akka vanthurukken daa 👄"
-    fancy_welcome = to_fancy_font(welcome_text)
-    await message.reply(fancy_welcome)
-
+    # Generate personalized welcome messages for each new user
+    for user in new_users:
+        try:
+            bot_name = client.me.first_name
+            user_name = user.first_name
+            use_emojis = should_use_emojis()
+            emoji_instruction = "Use appropriate emojis" if use_emojis else "Do not use any emojis"
+            
+            response = groq_client.chat.completions.create(
+                model=GROQ_MODEL_NAME,
+                messages=[
+                    {"role": "system", "content": f"You are {bot_name}, a witty Tamil-English (Tanglish) Telegram group friend."},
+                    {"role": "user", "content": f"Write a funny, personalized welcome message for {user_name} who just joined the group. Use Tanglish. {emoji_instruction}. Keep it short and engaging."}
+                ],
+                temperature=0.8,
+                max_tokens=100,
+            )
+            welcome_text = response.choices[0].message.content
+            if not use_emojis:
+                welcome_text = remove_emojis(welcome_text)
+            fancy_welcome = to_fancy_font(welcome_text)
+            await message.reply(fancy_welcome)
+        except Exception as e:
+            print(f"[AI] Welcome message error: {e}")
+            # Fallback to the specific message if AI fails
+            welcome_text = "Hyy akka vanthurukken daa 👄" if should_use_emojis() else "Hyy akka vanthurukken daa"
+            if not should_use_emojis():
+                welcome_text = remove_emojis(welcome_text)
+            fancy_welcome = to_fancy_font(welcome_text)
+            await message.reply(fancy_welcome)
 
 # ==========================================================
 #  MEDIA CACHE HANDLER
@@ -116,8 +159,40 @@ async def cache_media(client: Client, message: Message):
     elif message.animation:
         gif_cache.append(message.animation.file_id)
 
+# ==========================================================
+#  AI REPLY GENERATOR HELPER
+# ==========================================================
+async def generate_ai_reply(client: Client, message: Message, user_input: str) -> str:
+    """Generate AI reply using Groq with the bot's persona."""
+    bot_name = client.me.first_name
+    use_emojis = should_use_emojis()
+    emoji_instruction = "Use appropriate emojis" if use_emojis else "Do not use any emojis"
+    persona_prompt = (
+        f"You are {bot_name} — a witty Tamil-English (Tanglish) Telegram group friend. "
+        "Talk casually, like a human with emotions, humor, and natural slang. "
+        "Avoid robotic tone. Keep it short, funny, and engaging. "
+        f"{emoji_instruction}."
+    )
+    
+    messages = [{"role": "system", "content": persona_prompt}]
+    messages.append({"role": "user", "content": user_input})
 
+    try:
+        response = groq_client.chat.completions.create(
+            model=GROQ_MODEL_NAME,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=400,
+        )
+        ai_reply = response.choices[0].message.content
+        if not use_emojis:
+            ai_reply = remove_emojis(ai_reply)
+        return ai_reply
+    except Exception as e:
+        print(f"[AI] Reply error: {e}")
+        return "⚠️ Oru glitch vandhuduchu bro 😅 later try pannunga!" if should_use_emojis() else "⚠️ Oru glitch vandhuduchu bro later try pannunga!"
 
+# ==========================================================
 #  MAIN AI RESPONDER (FINAL & BEST VERSION)
 # ==========================================================
 @Client.on_message(filters.group & ~filters.command(["ai", "autodelete", "start", "search", "next", "end", "myprofile", "profile"]))
@@ -130,17 +205,6 @@ async def ai_responder(client: Client, message: Message):
     if message.from_user and message.from_user.is_bot:
         return
 
-    # --- This check is no longer needed because the filter handles it ---
-    # if message.text and message.text.startswith('/'):
-    #     return
-
-    bot_name = client.me.first_name
-    persona_prompt = (
-        f"You are {bot_name} — a witty Tamil-English (Tanglish) Telegram group friend. "
-        "Talk casually, like a human with emotions, humor, and natural slang. "
-        "Avoid robotic tone. Keep it short, funny, and engaging."
-    )
-
     is_reply_to_bot = bool(
         message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self
     )
@@ -150,27 +214,64 @@ async def ai_responder(client: Client, message: Message):
     )
     direct_interaction = is_reply_to_bot or is_tagged
 
+    # Check for specific messages and respond accordingly
+    if message.text:
+        text = message.text.lower()
+        
+        # Always respond with the specific message for "hi"
+        if text == "hi":
+            use_emojis = should_use_emojis()
+            welcome_text = "Hyy akka vanthurukken daa 👄" if use_emojis else "Hyy akka vanthurukken daa"
+            if not use_emojis:
+                welcome_text = remove_emojis(welcome_text)
+            fancy_welcome = to_fancy_font(welcome_text)
+            await message.reply(fancy_welcome)
+            return
+        
+        # Funny responses for other specific messages
+        if text in ["bye", "sari", "kilampu"]:
+            use_emojis = should_use_emojis()
+            funny_responses = {
+                "bye": [
+                    "Bye da mapla! Varreenga pola! 👋" if use_emojis else "Bye da mapla! Varreenga pola!",
+                    "Poitu varen da! Nalla irukka! 😊" if use_emojis else "Poitu varen da! Nalla irukka!",
+                    "Bye bye machi! Next time pakkaalam! 🤝" if use_emojis else "Bye bye machi! Next time pakkaalam!"
+                ],
+                "sari": [
+                    "Sari sari! Namma plan pannalam! 😎" if use_emojis else "Sari sari! Namma plan pannalam!",
+                    "Sari da! Unaku vera venuma? 🤔" if use_emojis else "Sari da! Unaku vera venuma?",
+                    "Sari sari! Puriyudhu! 👍" if use_emojis else "Sari sari! Puriyudhu!"
+                ],
+                "kilampu": [
+                    "Kilampuda mapla! Nalaiku pakalam! 😴" if use_emojis else "Kilampuda mapla! Nalaiku pakalam!",
+                    "Kilambu da! Nee yaarukum thevaiya? 😂" if use_emojis else "Kilambu da! Nee yaarukum thevaiya?",
+                    "Kilambu da! Poi padu! 😴" if use_emojis else "Kilambu da! Poi padu!"
+                ]
+            }
+            
+            response = random.choice(funny_responses.get(text, []))
+            if not use_emojis:
+                response = remove_emojis(response)
+            fancy_response = to_fancy_font(response)
+            await message.reply(fancy_response)
+            return
+
     if not direct_interaction and random.random() < 0.5:
         return
 
-    # --- Sticker/GIF replies ---
+    await client.send_chat_action(chat_id, enums.ChatAction.TYPING)
+
+    # --- Handle Sticker/GIF replies with AI ---
     if message.sticker or message.animation:
-        if sticker_cache or gif_cache:
-            if sticker_cache and gif_cache:
-                if random.choice([True, False]):
-                    await client.send_sticker(chat_id, random.choice(list(sticker_cache)), reply_to_message_id=message.id)
-                else:
-                    await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message.id)
-            elif sticker_cache:
-                await client.send_sticker(chat_id, random.choice(list(sticker_cache)), reply_to_message_id=message.id)
-            elif gif_cache:
-                await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message.id)
-        else:
-            await message.reply(random.choice([
-                "😂 semma sticker da!",
-                "🔥 idhu vera level reaction!",
-                "😎 haha nice da!"
-            ]))
+        media_type = "sticker" if message.sticker else "GIF"
+        use_emojis = should_use_emojis()
+        emoji_instruction = "Use appropriate emojis" if use_emojis else "Do not use any emojis"
+        user_input = f"User sent a {media_type}, reply in Tanglish as if you're reacting to it. {emoji_instruction}."
+        
+        ai_reply = await generate_ai_reply(client, message, user_input)
+        fancy_ai_reply = to_fancy_font(ai_reply)
+        
+        await message.reply(fancy_ai_reply)
         return
 
     # --- Spam / Link Filter ---
@@ -182,11 +283,11 @@ async def ai_responder(client: Client, message: Message):
 
     has_link = bool(re.search(URL_PATTERN, message.text or ""))
     if has_link and not is_admin:
-        await message.reply("⛔️ Link podatha bro, inga clean ah vaikkalam 😅")
+        use_emojis = should_use_emojis()
+        await message.reply("⛔️ Link podatha bro, inga clean ah vaikkalam 😅" if use_emojis else "⛔️ Link podatha bro, inga clean ah vaikkalam")
         return
 
-    await client.send_chat_action(chat_id, enums.ChatAction.TYPING)
-
+    # --- Random media reply for direct interaction ---
     if direct_interaction and random.random() < 0.4 and (sticker_cache or gif_cache):
         if sticker_cache and gif_cache:
             if random.choice([True, False]):
@@ -200,25 +301,11 @@ async def ai_responder(client: Client, message: Message):
         return
 
     # --- Text Reply from Groq ---
-    messages = [{"role": "system", "content": persona_prompt}]
     user_msg = message.text or message.caption or "User sent media."
-    messages.append({"role": "user", "content": user_msg})
-
-    try:
-        response = groq_client.chat.completions.create(
-            model=GROQ_MODEL_NAME,
-            messages=messages,
-            temperature=0.7,
-            max_tokens=400,
-        )
-        ai_reply = response.choices[0].message.content
-        
-        fancy_ai_reply = to_fancy_font(ai_reply)
-        
-        await message.reply(fancy_ai_reply)
-    except Exception as e:
-        print(f"[AI] Reply error: {e}")
-        await message.reply("⚠️ Oru glitch vandhuduchu bro 😅 later try pannunga!")
+    ai_reply = await generate_ai_reply(client, message, user_msg)
+    fancy_ai_reply = to_fancy_font(ai_reply)
+    
+    await message.reply(fancy_ai_reply)
 
 # ==========================================================
 #  AUTO GREETING SYSTEM
@@ -228,23 +315,26 @@ async def send_greeting_message(client: Client, chat_id: int, message_type: str)
         return
     try:
         bot_name = client.me.first_name
+        use_emojis = should_use_emojis()
+        emoji_instruction = "Use appropriate emojis" if use_emojis else "Do not use any emojis"
+        
         response = groq_client.chat.completions.create(
             model=GROQ_MODEL_NAME,
             messages=[
                 {"role": "system", "content": f"You are {bot_name}, a cheerful Tamil-English (Tanglish) friend."},
-                {"role": "user", "content": f"Write a short '{message_type}' greeting in Tanglish with emojis."}
+                {"role": "user", "content": f"Write a short '{message_type}' greeting in Tanglish. {emoji_instruction}."}
             ],
             temperature=0.8,
             max_tokens=60,
         )
         greeting_text = response.choices[0].message.content
-        
+        if not use_emojis:
+            greeting_text = remove_emojis(greeting_text)
         fancy_greeting = to_fancy_font(greeting_text)
         
         await client.send_message(chat_id, fancy_greeting)
     except Exception as e:
         print(f"[AI] Greeting error in {chat_id}: {e}")
-
 
 async def greeting_scheduler(client: Client):
     global greeting_morning_sent, greeting_night_sent
@@ -273,7 +363,6 @@ async def greeting_scheduler(client: Client):
             greeting_night_sent = True
         
         await asyncio.sleep(50)
-
 
 async def start_greeting_task(client: Client):
     print("[AI] Starting greeting scheduler task.")
