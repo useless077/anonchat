@@ -82,10 +82,11 @@ async def load_ai_state():
     """Loads all AI-enabled groups from the database into the global set."""
     global ai_enabled_groups
     try:
-        all_enabled = await db.get_all_ai_enabled_groups()
+        # Fixed: Using the correct method name from your database class
+        all_enabled = await db.get_all_ai_enabled_chats()
         if all_enabled:
             ai_enabled_groups = set(all_enabled)
-        print(f"[AI] Loaded {len(ai_enabled_groups)} AI-enabled groups from DB.")
+        print(f"[AI] Loaded {len(ai_enabled_groups)} AI-enabled groups from DB: {ai_enabled_groups}")
     except Exception as e:
         print(f"[AI] Error loading AI state from DB: {e}")
 
@@ -111,10 +112,12 @@ async def ai_toggle(client: Client, message: Message):
     if status == "on":
         ai_enabled_groups.add(chat_id)
         await db.set_ai_status(chat_id, True)
+        print(f"[AI] Enabled AI in chat {chat_id}")
         await message.reply("✅ **AI ON** — Bot is ready to talk! 😎")
     elif status == "off":
         ai_enabled_groups.discard(chat_id)
         await db.set_ai_status(chat_id, False)
+        print(f"[AI] Disabled AI in chat {chat_id}")
         await message.reply("🛑 **AI OFF** — Bot is taking a break. 😴")
     else:
         await message.reply("Use `/ai on` or `/ai off` correctly.")
@@ -127,8 +130,19 @@ async def welcome_new_member(client: Client, message: Message):
     """Greets new users with a custom message if AI is enabled."""
     chat_id = message.chat.id
 
-    # Use in-memory set for faster checks
-    if chat_id not in ai_enabled_groups:
+    # Check both in-memory set and database
+    is_ai_enabled = chat_id in ai_enabled_groups
+    if not is_ai_enabled:
+        try:
+            is_ai_enabled = await db.get_ai_status(chat_id)
+            if is_ai_enabled:
+                ai_enabled_groups.add(chat_id)  # Update in-memory set
+                print(f"[AI] Updated in-memory set for chat {chat_id}")
+        except Exception as e:
+            print(f"[AI] Error checking AI status for chat {chat_id}: {e}")
+            return
+    
+    if not is_ai_enabled:
         return
 
     new_users = [user for user in message.new_chat_members if not user.is_bot]
@@ -277,8 +291,19 @@ async def ai_responder(client: Client, message: Message):
         
     chat_id = message.chat.id
     
-    # Use in-memory set for faster checks instead of DB call
-    if chat_id not in ai_enabled_groups:
+    # Check both in-memory set and database
+    is_ai_enabled = chat_id in ai_enabled_groups
+    if not is_ai_enabled:
+        try:
+            is_ai_enabled = await db.get_ai_status(chat_id)
+            if is_ai_enabled:
+                ai_enabled_groups.add(chat_id)  # Update in-memory set
+                print(f"[AI] Updated in-memory set for chat {chat_id}")
+        except Exception as e:
+            print(f"[AI] Error checking AI status for chat {chat_id}: {e}")
+            return
+    
+    if not is_ai_enabled:
         print(f"[AI] AI not enabled in chat {chat_id}")
         return
         
