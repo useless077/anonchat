@@ -12,12 +12,10 @@ from config import GROQ_API_KEY, ADMIN_IDS
 from database.users import db
 
 # --- MODEL NAME ---
-# CORRECTED: This is a valid Groq model name.
 GROQ_MODEL_NAME = "llama3-70b-8192"
 
 # --- GLOBAL STATE ---
 ai_enabled_groups = set()
-# IMPROVEMENT: Using deque with a maxlen to prevent memory issues.
 sticker_cache = deque(maxlen=50)
 gif_cache = deque(maxlen=50)
 
@@ -28,10 +26,6 @@ try:
 except Exception as e:
     print(f"[AI] Groq init error: {e}")
     groq_client = None
-
-# --- PERSONA ---
-# The persona will now be created dynamically inside the functions
-# to use the bot's actual name.
 
 URL_PATTERN = r'(https?://\S+|t\.me/\S+|telegram\.me/\S+)'
 
@@ -67,11 +61,11 @@ async def ai_toggle(client: Client, message: Message):
     if status == "on":
         ai_enabled_groups.add(chat_id)
         await db.set_ai_status(chat_id, True)
-        await message.reply("✅ **AI ON** — Groq vandhachu bro 😎")
+        await message.reply("✅ **AI ON** — Bot is ready to talk! 😎")
     elif status == "off":
         ai_enabled_groups.discard(chat_id)
         await db.set_ai_status(chat_id, False)
-        await message.reply("🛑 **AI OFF** — Groq break eduthukkan 😴")
+        await message.reply("🛑 **AI OFF** — Bot is taking a break. 😴")
     else:
         await message.reply("Use `/ai on` or `/ai off` correctly.")
 
@@ -84,16 +78,13 @@ async def welcome_new_member(client: Client, message: Message):
     """Greets new users with a custom message if AI is enabled."""
     chat_id = message.chat.id
 
-    # Check if AI is enabled in the group
     if not await db.get_ai_status(chat_id):
         return
 
-    # Avoid greeting other bots
     new_users = [user for user in message.new_chat_members if not user.is_bot]
     if not new_users:
         return
 
-    # Send the exact requested greeting
     await message.reply("Hyy akka vanthurukken daa 👄")
 
 
@@ -113,7 +104,8 @@ async def cache_media(client: Client, message: Message):
 # ==========================================================
 #  MAIN AI RESPONDER
 # ==========================================================
-@Client.on_message(filters.group & ~filters.command)
+# --- THIS IS THE LINE THAT WAS FIXED ---
+@Client.on_message(filters.group & ~filters.command())
 async def ai_responder(client: Client, message: Message):
     if not groq_client:
         return
@@ -125,7 +117,6 @@ async def ai_responder(client: Client, message: Message):
     if message.text and message.text.startswith('/'):
         return
 
-    # --- Create a dynamic persona using the bot's name ---
     bot_name = client.me.first_name
     persona_prompt = (
         f"You are {bot_name} — a witty Tamil-English (Tanglish) Telegram group friend. "
@@ -133,7 +124,6 @@ async def ai_responder(client: Client, message: Message):
         "Avoid robotic tone. Keep it short, funny, and engaging."
     )
 
-    # --- Interaction detection ---
     is_reply_to_bot = bool(
         message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self
     )
@@ -143,11 +133,9 @@ async def ai_responder(client: Client, message: Message):
     )
     direct_interaction = is_reply_to_bot or is_tagged
 
-    # --- Random filter for untagged messages ---
     if not direct_interaction and random.random() < 0.5:
         return
 
-    # --- Sticker/GIF replies ---
     if message.sticker or message.animation:
         if sticker_cache or gif_cache:
             if sticker_cache and gif_cache:
@@ -167,7 +155,6 @@ async def ai_responder(client: Client, message: Message):
             ]))
         return
 
-    # --- Spam / Link Filter ---
     try:
         member = await client.get_chat_member(chat_id, message.from_user.id)
         is_admin = member.status in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]
@@ -179,7 +166,6 @@ async def ai_responder(client: Client, message: Message):
         await message.reply("⛔️ Link podatha bro, inga clean ah vaikkalam 😅")
         return
 
-    # --- Generate Reply (Text or Sticker/GIF mix) ---
     await client.send_chat_action(chat_id, enums.ChatAction.TYPING)
 
     if direct_interaction and random.random() < 0.4 and (sticker_cache or gif_cache):
@@ -194,7 +180,6 @@ async def ai_responder(client: Client, message: Message):
             await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message.id)
         return
 
-    # --- Text Reply from Groq ---
     messages = [{"role": "system", "content": persona_prompt}]
     user_msg = message.text or message.caption or "User sent media."
     messages.append({"role": "user", "content": user_msg})
@@ -210,17 +195,16 @@ async def ai_responder(client: Client, message: Message):
         await message.reply(ai_reply)
     except Exception as e:
         print(f"[AI] Reply error: {e}")
-        await message.reply("⚠️ Groq ku oru glitch vandhuduchu bro 😅 later try pannunga!")
+        await message.reply("⚠️ Oru glitch vandhuduchu bro 😅 later try pannunga!")
 
 
 # ==========================================================
-#  AUTO GREETING SYSTEM (IMPROVED)
+#  AUTO GREETING SYSTEM
 # ==========================================================
 async def send_greeting_message(client: Client, chat_id: int, message_type: str):
     if not groq_client:
         return
     try:
-        # Use bot's name here as well
         bot_name = client.me.first_name
         response = groq_client.chat.completions.create(
             model=GROQ_MODEL_NAME,
@@ -242,12 +226,10 @@ async def greeting_scheduler(client: Client):
         now = datetime.now()
         current_time = now.time()
         
-        # Reset flags daily at midnight
         if current_time.hour == 0 and current_time.minute == 0:
             greeting_morning_sent = False
             greeting_night_sent = False
 
-        # Morning greeting window (7:30 AM - 7:31 AM)
         morning_time = time(7, 30)
         if morning_time <= current_time <= time(7, 31) and not greeting_morning_sent:
             print("[AI] Sending morning greetings...")
@@ -256,7 +238,6 @@ async def greeting_scheduler(client: Client):
                 await send_greeting_message(client, gid, "Good morning")
             greeting_morning_sent = True
 
-        # Night greeting window (10:30 PM - 10:31 PM)
         night_time = time(22, 30)
         if night_time <= current_time <= time(22, 31) and not greeting_night_sent:
             print("[AI] Sending night greetings...")
@@ -265,10 +246,9 @@ async def greeting_scheduler(client: Client):
                 await send_greeting_message(client, gid, "Good night")
             greeting_night_sent = True
         
-        await asyncio.sleep(50) # Check every 50 seconds
+        await asyncio.sleep(50)
 
 
-# --- Function to be called from main.py ---
 async def start_greeting_task(client: Client):
     print("[AI] Starting greeting scheduler task.")
     asyncio.create_task(greeting_scheduler(client))
