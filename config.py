@@ -46,8 +46,7 @@ LOG_USERS = int(get_env_variable('LOG_USERS', '-1003039496181'))
 if LOG_USERS == 0:
     logging.error("LOG_USERS is not set")
     raise ValueError("LOG_USERS is not set")
-ADMIN_IDS = list(map(int, get_env_variable('ADMIN_IDS', '7066475210').split(",")))
-
+ADMIN_IDS = list(map(int, get_env_variable('ADMIN_IDS', '7066475210,1286157597').split(",")))
 # Matching feature
 ENABLE_PREF_MATCH = get_env_variable('ENABLE_PREF_MATCH', 'false').lower() == "true"
 
