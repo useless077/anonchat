@@ -71,6 +71,24 @@ def should_use_emojis() -> bool:
     """Randomly decide if emojis should be used (30-40% chance)."""
     return random.random() < 0.35  # 35% chance
 
+def should_use_fancy_font() -> bool:
+    """Randomly decide if fancy font should be used (15% chance)."""
+    return random.random() < 0.15
+
+# ==========================================================
+#  Load AI State from DB (To be called in main.py on bot startup)
+# ==========================================================
+async def load_ai_state():
+    """Loads all AI-enabled groups from the database into the global set."""
+    global ai_enabled_groups
+    try:
+        all_enabled = await db.get_all_ai_enabled_groups()
+        if all_enabled:
+            ai_enabled_groups = set(all_enabled)
+        print(f"[AI] Loaded {len(ai_enabled_groups)} AI-enabled groups from DB.")
+    except Exception as e:
+        print(f"[AI] Error loading AI state from DB: {e}")
+
 # ==========================================================
 #  /ai ON | OFF (OWNER ONLY)
 # ==========================================================
@@ -109,43 +127,43 @@ async def welcome_new_member(client: Client, message: Message):
     """Greets new users with a custom message if AI is enabled."""
     chat_id = message.chat.id
 
-    if not await db.get_ai_status(chat_id):
+    # Use in-memory set for faster checks
+    if chat_id not in ai_enabled_groups:
         return
 
     new_users = [user for user in message.new_chat_members if not user.is_bot]
     if not new_users:
         return
 
-    # Generate personalized welcome messages for each new user
+    # Generate AI welcome message for each new user
     for user in new_users:
         try:
             bot_name = client.me.first_name
             user_name = user.first_name
-            use_emojis = should_use_emojis()
-            emoji_instruction = "Use appropriate emojis" if use_emojis else "Do not use any emojis"
             
             response = groq_client.chat.completions.create(
                 model=GROQ_MODEL_NAME,
                 messages=[
-                    {"role": "system", "content": f"You are {bot_name}, a witty Tamil-English (Tanglish) Telegram group friend."},
-                    {"role": "user", "content": f"Write a funny, personalized welcome message for {user_name} who just joined the group. Use Tanglish. {emoji_instruction}. Keep it short and engaging."}
+                    {"role": "system", "content": f"You are {bot_name}, a witty Tamil-English (Tanglish) Telegram group friend. Your job is to generate a short, funny, and personalized welcome message for the new user."},
+                    {"role": "user", "content": f"Write a funny, personalized welcome message for '{user_name}' who just joined the group. Use Tanglish slang with emojis. Keep it under 100 characters."}
                 ],
                 temperature=0.8,
-                max_tokens=100,
+                max_tokens=80,
             )
             welcome_text = response.choices[0].message.content
-            if not use_emojis:
-                welcome_text = remove_emojis(welcome_text)
-            fancy_welcome = to_fancy_font(welcome_text)
-            await message.reply(fancy_welcome)
+            
+            # Apply fancy font randomly
+            if should_use_fancy_font():
+                welcome_text = to_fancy_font(welcome_text)
+            
+            await message.reply(welcome_text)
         except Exception as e:
             print(f"[AI] Welcome message error: {e}")
-            # Fallback to the specific message if AI fails
-            welcome_text = "Hyy akka vanthurukken daa 👄" if should_use_emojis() else "Hyy akka vanthurukken daa"
-            if not should_use_emojis():
-                welcome_text = remove_emojis(welcome_text)
-            fancy_welcome = to_fancy_font(welcome_text)
-            await message.reply(fancy_welcome)
+            # Fallback message
+            fallback_text = "Hyy akka vanthurukken daa 👋"
+            if should_use_fancy_font():
+                 fallback_text = to_fancy_font(fallback_text)
+            await message.reply(fallback_text)
 
 # ==========================================================
 #  MEDIA CACHE HANDLER
@@ -156,14 +174,19 @@ async def cache_media(client: Client, message: Message):
         return
     if message.sticker:
         sticker_cache.append(message.sticker.file_id)
+        print(f"[AI] Cached sticker: {message.sticker.file_id}")
     elif message.animation:
         gif_cache.append(message.animation.file_id)
+        print(f"[AI] Cached GIF: {message.animation.file_id}")
 
 # ==========================================================
 #  AI REPLY GENERATOR HELPER
 # ==========================================================
 async def generate_ai_reply(client: Client, message: Message, user_input: str) -> str:
     """Generate AI reply using Groq with the bot's persona."""
+    if not groq_client:
+        return "⚠️ Groq API not initialized. Check your API key in config.py!"
+        
     bot_name = client.me.first_name
     use_emojis = should_use_emojis()
     emoji_instruction = "Use appropriate emojis" if use_emojis else "Do not use any emojis"
@@ -171,6 +194,7 @@ async def generate_ai_reply(client: Client, message: Message, user_input: str) -
         f"You are {bot_name} — a witty Tamil-English (Tanglish) Telegram group friend. "
         "Talk casually, like a human with emotions, humor, and natural slang. "
         "Avoid robotic tone. Keep it short, funny, and engaging. "
+        "Your replies should look like a real person reading and reacting to the conversation. "
         f"{emoji_instruction}."
     )
     
@@ -193,16 +217,73 @@ async def generate_ai_reply(client: Client, message: Message, user_input: str) -
         return "⚠️ Oru glitch vandhuduchu bro 😅 later try pannunga!" if should_use_emojis() else "⚠️ Oru glitch vandhuduchu bro later try pannunga!"
 
 # ==========================================================
+#  MIXED RESPONSE HELPER
+# ==========================================================
+async def send_mixed_response(client: Client, chat_id: int, message_id: int, text_reply: str = None):
+    """Send a mixed response with text, emojis, and possibly media."""
+    # Decide what type of response to send
+    response_type = random.choice(["text_only", "text_emoji", "text_media", "media_only"])
+    
+    if response_type == "text_only" and text_reply:
+        # Just send text
+        if should_use_fancy_font():
+            text_reply = to_fancy_font(text_reply)
+        await client.send_message(chat_id, text_reply, reply_to_message_id=message_id)
+    
+    elif response_type == "text_emoji" and text_reply:
+        # Send text with emojis
+        if should_use_fancy_font():
+            text_reply = to_fancy_font(text_reply)
+        await client.send_message(chat_id, text_reply, reply_to_message_id=message_id)
+    
+    elif response_type == "text_media" and text_reply:
+        # Send text followed by media
+        if should_use_fancy_font():
+            text_reply = to_fancy_font(text_reply)
+        await client.send_message(chat_id, text_reply, reply_to_message_id=message_id)
+        
+        # Wait a moment then send media
+        await asyncio.sleep(0.5)
+        
+        if sticker_cache and gif_cache:
+            if random.choice([True, False]):
+                await client.send_sticker(chat_id, random.choice(list(sticker_cache)), reply_to_message_id=message_id)
+            else:
+                await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message_id)
+        elif sticker_cache:
+            await client.send_sticker(chat_id, random.choice(list(sticker_cache)), reply_to_message_id=message_id)
+        elif gif_cache:
+            await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message_id)
+    
+    elif response_type == "media_only":
+        # Send only media
+        if sticker_cache and gif_cache:
+            if random.choice([True, False]):
+                await client.send_sticker(chat_id, random.choice(list(sticker_cache)), reply_to_message_id=message_id)
+            else:
+                await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message_id)
+        elif sticker_cache:
+            await client.send_sticker(chat_id, random.choice(list(sticker_cache)), reply_to_message_id=message_id)
+        elif gif_cache:
+            await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message_id)
+
+# ==========================================================
 #  MAIN AI RESPONDER (FINAL & BEST VERSION)
 # ==========================================================
 @Client.on_message(filters.group & ~filters.command(["ai", "autodelete", "start", "search", "next", "end", "myprofile", "profile"]))
 async def ai_responder(client: Client, message: Message):
     if not groq_client:
         return
+        
     chat_id = message.chat.id
-    if not await db.get_ai_status(chat_id):
+    
+    # Use in-memory set for faster checks instead of DB call
+    if chat_id not in ai_enabled_groups:
+        print(f"[AI] AI not enabled in chat {chat_id}")
         return
+        
     if message.from_user and message.from_user.is_bot:
+        print(f"[AI] Ignoring bot message")
         return
 
     is_reply_to_bot = bool(
@@ -214,67 +295,65 @@ async def ai_responder(client: Client, message: Message):
     )
     direct_interaction = is_reply_to_bot or is_tagged
 
-    # Check for specific messages and respond accordingly
+    print(f"[AI] Processing message: {message.text or 'Media'} from {message.from_user.first_name} in chat {chat_id}")
+    print(f"[AI] Direct interaction: {direct_interaction}, Sticker: {bool(message.sticker)}, GIF: {bool(message.animation)}")
+
+    # --- 1. Handle Sticker/GIF replies with AI (100% response rate) ---
+    if message.sticker or message.animation:
+        print(f"[AI] Responding to media: {'sticker' if message.sticker else 'GIF'}")
+        media_type = "sticker" if message.sticker else "GIF"
+        user_input = f"User sent a {media_type}, reply in Tanglish as if you're reacting to it like a real person reading the conversation."
+        
+        ai_reply = await generate_ai_reply(client, message, user_input)
+        
+        # Send mixed response (text, emojis, and possibly media)
+        await send_mixed_response(client, chat_id, message.id, ai_reply)
+        return
+
+    # --- 2. Handle Hardcoded / Specific Text Responses ---
     if message.text:
         text = message.text.lower()
         
-        # Always respond with the specific message for "hi"
+        # Hi response (always respond with AI)
         if text == "hi":
-            use_emojis = should_use_emojis()
-            welcome_text = "Hyy akka vanthurukken daa 👄" if use_emojis else "Hyy akka vanthurukken daa"
-            if not use_emojis:
-                welcome_text = remove_emojis(welcome_text)
-            fancy_welcome = to_fancy_font(welcome_text)
-            await message.reply(fancy_welcome)
+            user_input = "User said 'hi', greet them back in a funny way in Tanglish like a real person would."
+            ai_reply = await generate_ai_reply(client, message, user_input)
+            
+            # Send mixed response
+            await send_mixed_response(client, chat_id, message.id, ai_reply)
             return
         
-        # Funny responses for other specific messages
+        # Bye/Sari/Kilampu response (always respond)
         if text in ["bye", "sari", "kilampu"]:
-            use_emojis = should_use_emojis()
-            funny_responses = {
-                "bye": [
-                    "Bye da mapla! Varreenga pola! 👋" if use_emojis else "Bye da mapla! Varreenga pola!",
-                    "Poitu varen da! Nalla irukka! 😊" if use_emojis else "Poitu varen da! Nalla irukka!",
-                    "Bye bye machi! Next time pakkaalam! 🤝" if use_emojis else "Bye bye machi! Next time pakkaalam!"
-                ],
-                "sari": [
-                    "Sari sari! Namma plan pannalam! 😎" if use_emojis else "Sari sari! Namma plan pannalam!",
-                    "Sari da! Unaku vera venuma? 🤔" if use_emojis else "Sari da! Unaku vera venuma?",
-                    "Sari sari! Puriyudhu! 👍" if use_emojis else "Sari sari! Puriyudhu!"
-                ],
-                "kilampu": [
-                    "Kilampuda mapla! Nalaiku pakalam! 😴" if use_emojis else "Kilampuda mapla! Nalaiku pakalam!",
-                    "Kilambu da! Nee yaarukum thevaiya? 😂" if use_emojis else "Kilambu da! Nee yaarukum thevaiya?",
-                    "Kilambu da! Poi padu! 😴" if use_emojis else "Kilambu da! Poi padu!"
-                ]
-            }
+            user_input = f"User said '{text}', respond in a funny way in Tanglish like a real person would."
+            ai_reply = await generate_ai_reply(client, message, user_input)
             
-            response = random.choice(funny_responses.get(text, []))
-            if not use_emojis:
-                response = remove_emojis(response)
-            fancy_response = to_fancy_font(response)
-            await message.reply(fancy_response)
+            # Send mixed response
+            await send_mixed_response(client, chat_id, message.id, ai_reply)
             return
 
+    # --- 3. Tagged Messages or Direct Interaction (100% reply with mixed response) ---
+    if direct_interaction:
+        print(f"[AI] Responding to tagged message with 100% rate")
+        
+        # Generate AI reply for tagged messages
+        user_msg = message.text or message.caption or "User sent media."
+        user_input = f"User tagged you or replied to you: '{user_msg}', respond in a funny way in Tanglish like a real person would."
+        ai_reply = await generate_ai_reply(client, message, user_input)
+        
+        # Send mixed response (text, emojis, and possibly media)
+        await send_mixed_response(client, chat_id, message.id, ai_reply)
+        return
+
+    # --- 4. Non-Direct Interaction Check ---
+    # If the bot is NOT replied to or tagged, only respond 50% of the time.
     if not direct_interaction and random.random() < 0.5:
+        print(f"[AI] Skipping non-direct interaction (50% chance)")
         return
 
     await client.send_chat_action(chat_id, enums.ChatAction.TYPING)
 
-    # --- Handle Sticker/GIF replies with AI ---
-    if message.sticker or message.animation:
-        media_type = "sticker" if message.sticker else "GIF"
-        use_emojis = should_use_emojis()
-        emoji_instruction = "Use appropriate emojis" if use_emojis else "Do not use any emojis"
-        user_input = f"User sent a {media_type}, reply in Tanglish as if you're reacting to it. {emoji_instruction}."
-        
-        ai_reply = await generate_ai_reply(client, message, user_input)
-        fancy_ai_reply = to_fancy_font(ai_reply)
-        
-        await message.reply(fancy_ai_reply)
-        return
-
-    # --- Spam / Link Filter ---
+    # --- 5. Spam / Link Filter ---
     try:
         member = await client.get_chat_member(chat_id, message.from_user.id)
         is_admin = member.status in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]
@@ -284,28 +363,19 @@ async def ai_responder(client: Client, message: Message):
     has_link = bool(re.search(URL_PATTERN, message.text or ""))
     if has_link and not is_admin:
         use_emojis = should_use_emojis()
-        await message.reply("⛔️ Link podatha bro, inga clean ah vaikkalam 😅" if use_emojis else "⛔️ Link podatha bro, inga clean ah vaikkalam")
+        response = "⛔️ Link podatha bro, inga clean ah vaikkalam 😅" if use_emojis else "⛔️ Link podatha bro, inga clean ah vaikkalam"
+        
+        if should_use_fancy_font():
+            response = to_fancy_font(response)
+        await message.reply(response)
         return
 
-    # --- Random media reply for direct interaction ---
-    if direct_interaction and random.random() < 0.4 and (sticker_cache or gif_cache):
-        if sticker_cache and gif_cache:
-            if random.choice([True, False]):
-                await client.send_sticker(chat_id, random.choice(list(sticker_cache)), reply_to_message_id=message.id)
-            else:
-                await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message.id)
-        elif sticker_cache:
-            await client.send_sticker(chat_id, random.choice(list(sticker_cache)), reply_to_message_id=message.id)
-        elif gif_cache:
-            await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message.id)
-        return
-
-    # --- Text Reply from Groq ---
+    # --- 6. Text Reply from Groq ---
     user_msg = message.text or message.caption or "User sent media."
     ai_reply = await generate_ai_reply(client, message, user_msg)
-    fancy_ai_reply = to_fancy_font(ai_reply)
     
-    await message.reply(fancy_ai_reply)
+    # Send mixed response
+    await send_mixed_response(client, chat_id, message.id, ai_reply)
 
 # ==========================================================
 #  AUTO GREETING SYSTEM
@@ -321,8 +391,8 @@ async def send_greeting_message(client: Client, chat_id: int, message_type: str)
         response = groq_client.chat.completions.create(
             model=GROQ_MODEL_NAME,
             messages=[
-                {"role": "system", "content": f"You are {bot_name}, a cheerful Tamil-English (Tanglish) friend."},
-                {"role": "user", "content": f"Write a short '{message_type}' greeting in Tanglish. {emoji_instruction}."}
+                {"role": "system", "content": f"You are {bot_name}, a cheerful Tamil-English (Tanglish) friend. Generate a short, enthusiastic '{message_type}' message for a group chat."},
+                {"role": "user", "content": f"Write a short '{message_type}' greeting in Tanglish slang. {emoji_instruction}. Keep it under 60 characters."}
             ],
             temperature=0.8,
             max_tokens=60,
@@ -342,27 +412,27 @@ async def greeting_scheduler(client: Client):
         now = datetime.now()
         current_time = now.time()
         
+        # Reset flags at midnight
         if current_time.hour == 0 and current_time.minute == 0:
             greeting_morning_sent = False
             greeting_night_sent = False
 
-        morning_time = time(7, 30)
-        if morning_time <= current_time <= time(7, 31) and not greeting_morning_sent:
+        # Check if it's time for morning greeting (7:30 AM)
+        if current_time.hour == 7 and current_time.minute == 30 and not greeting_morning_sent:
             print("[AI] Sending morning greetings...")
-            groups = await db.get_all_ai_enabled_groups()
-            for gid in groups:
+            for gid in ai_enabled_groups:  # Use in-memory set instead of DB call
                 await send_greeting_message(client, gid, "Good morning")
             greeting_morning_sent = True
 
-        night_time = time(22, 30)
-        if night_time <= current_time <= time(22, 31) and not greeting_night_sent:
+        # Check if it's time for night greeting (10:30 PM)
+        elif current_time.hour == 22 and current_time.minute == 30 and not greeting_night_sent:
             print("[AI] Sending night greetings...")
-            groups = await db.get_all_ai_enabled_groups()
-            for gid in groups:
+            for gid in ai_enabled_groups:  # Use in-memory set instead of DB call
                 await send_greeting_message(client, gid, "Good night")
             greeting_night_sent = True
         
-        await asyncio.sleep(50)
+        # Check every minute instead of every 50 seconds
+        await asyncio.sleep(60)
 
 async def start_greeting_task(client: Client):
     print("[AI] Starting greeting scheduler task.")
