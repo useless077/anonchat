@@ -1,7 +1,10 @@
+# plugins/ai.py
+
 import asyncio
 import random
 import re
-from datetime import datetime
+from datetime import datetime, time
+from collections import deque
 from groq import Groq
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
@@ -9,12 +12,14 @@ from config import GROQ_API_KEY, ADMIN_IDS
 from database.users import db
 
 # --- MODEL NAME ---
-GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
+# CORRECTED: This is a valid Groq model name.
+GROQ_MODEL_NAME = "llama3-70b-8192"
 
 # --- GLOBAL STATE ---
 ai_enabled_groups = set()
-sticker_cache = set()
-gif_cache = set()
+# IMPROVEMENT: Using deque with a maxlen to prevent memory issues.
+sticker_cache = deque(maxlen=50)
+gif_cache = deque(maxlen=50)
 
 # --- INIT GROQ CLIENT ---
 try:
@@ -25,14 +30,14 @@ except Exception as e:
     groq_client = None
 
 # --- PERSONA ---
-AI_PERSONA_PROMPT = (
-    "You are Groq — a witty Tamil-English (Tanglish) Telegram group friend. "
-    "Talk casually, like a human with emotions, humor, and natural slang. "
-    "Avoid robotic tone. Keep it short, funny, and engaging."
-)
+# The persona will now be created dynamically inside the functions
+# to use the bot's actual name.
 
 URL_PATTERN = r'(https?://\S+|t\.me/\S+|telegram\.me/\S+)'
 
+# --- Flags for Greeting System ---
+greeting_morning_sent = False
+greeting_night_sent = False
 
 # ==========================================================
 #  /ai ON | OFF
@@ -42,7 +47,6 @@ async def ai_toggle(client: Client, message: Message):
     chat_id = message.chat.id
     sender = message.from_user
 
-    # Check permissions
     try:
         member = await client.get_chat_member(chat_id, sender.id)
         is_admin = member.status in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER)
@@ -73,22 +77,43 @@ async def ai_toggle(client: Client, message: Message):
 
 
 # ==========================================================
-#  MEDIA CACHE HANDLER (store stickers/gifs)
+#  NEW MEMBER WELCOME HANDLER
+# ==========================================================
+@Client.on_message(filters.service & filters.new_chat_members)
+async def welcome_new_member(client: Client, message: Message):
+    """Greets new users with a custom message if AI is enabled."""
+    chat_id = message.chat.id
+
+    # Check if AI is enabled in the group
+    if not await db.get_ai_status(chat_id):
+        return
+
+    # Avoid greeting other bots
+    new_users = [user for user in message.new_chat_members if not user.is_bot]
+    if not new_users:
+        return
+
+    # Send the exact requested greeting
+    await message.reply("Hyy akka vanthurukken daa 👄")
+
+
+# ==========================================================
+#  MEDIA CACHE HANDLER
 # ==========================================================
 @Client.on_message(filters.group & (filters.sticker | filters.animation))
 async def cache_media(client: Client, message: Message):
     if not message.from_user or message.from_user.is_bot:
         return
     if message.sticker:
-        sticker_cache.add(message.sticker.file_id)
+        sticker_cache.append(message.sticker.file_id)
     elif message.animation:
-        gif_cache.add(message.animation.file_id)
+        gif_cache.append(message.animation.file_id)
 
 
 # ==========================================================
 #  MAIN AI RESPONDER
 # ==========================================================
-@Client.on_message(filters.group & ~filters.command(["ai", "autodelete", "start", "search", "next", "end", "myprofile", "profile"]))
+@Client.on_message(filters.group & ~filters.command)
 async def ai_responder(client: Client, message: Message):
     if not groq_client:
         return
@@ -99,6 +124,14 @@ async def ai_responder(client: Client, message: Message):
         return
     if message.text and message.text.startswith('/'):
         return
+
+    # --- Create a dynamic persona using the bot's name ---
+    bot_name = client.me.first_name
+    persona_prompt = (
+        f"You are {bot_name} — a witty Tamil-English (Tanglish) Telegram group friend. "
+        "Talk casually, like a human with emotions, humor, and natural slang. "
+        "Avoid robotic tone. Keep it short, funny, and engaging."
+    )
 
     # --- Interaction detection ---
     is_reply_to_bot = bool(
@@ -116,12 +149,6 @@ async def ai_responder(client: Client, message: Message):
 
     # --- Sticker/GIF replies ---
     if message.sticker or message.animation:
-        if message.sticker:
-            sticker_cache.add(message.sticker.file_id)
-        elif message.animation:
-            gif_cache.add(message.animation.file_id)
-
-        # Always react to user media
         if sticker_cache or gif_cache:
             if sticker_cache and gif_cache:
                 if random.choice([True, False]):
@@ -155,7 +182,6 @@ async def ai_responder(client: Client, message: Message):
     # --- Generate Reply (Text or Sticker/GIF mix) ---
     await client.send_chat_action(chat_id, enums.ChatAction.TYPING)
 
-    # 40% sticker/gif for tagged reply, 60% text
     if direct_interaction and random.random() < 0.4 and (sticker_cache or gif_cache):
         if sticker_cache and gif_cache:
             if random.choice([True, False]):
@@ -169,7 +195,7 @@ async def ai_responder(client: Client, message: Message):
         return
 
     # --- Text Reply from Groq ---
-    messages = [{"role": "system", "content": AI_PERSONA_PROMPT}]
+    messages = [{"role": "system", "content": persona_prompt}]
     user_msg = message.text or message.caption or "User sent media."
     messages.append({"role": "user", "content": user_msg})
 
@@ -188,16 +214,18 @@ async def ai_responder(client: Client, message: Message):
 
 
 # ==========================================================
-#  AUTO GREETING SYSTEM
+#  AUTO GREETING SYSTEM (IMPROVED)
 # ==========================================================
 async def send_greeting_message(client: Client, chat_id: int, message_type: str):
     if not groq_client:
         return
     try:
+        # Use bot's name here as well
+        bot_name = client.me.first_name
         response = groq_client.chat.completions.create(
             model=GROQ_MODEL_NAME,
             messages=[
-                {"role": "system", "content": "You are Groq, a cheerful Tamil-English (Tanglish) friend."},
+                {"role": "system", "content": f"You are {bot_name}, a cheerful Tamil-English (Tanglish) friend."},
                 {"role": "user", "content": f"Write a short '{message_type}' greeting in Tanglish with emojis."}
             ],
             temperature=0.8,
@@ -209,18 +237,38 @@ async def send_greeting_message(client: Client, chat_id: int, message_type: str)
 
 
 async def greeting_scheduler(client: Client):
+    global greeting_morning_sent, greeting_night_sent
     while True:
-        now = datetime.now().strftime("%H:%M")
-        groups = await db.get_all_ai_enabled_groups()
-        if now == "07:30":
+        now = datetime.now()
+        current_time = now.time()
+        
+        # Reset flags daily at midnight
+        if current_time.hour == 0 and current_time.minute == 0:
+            greeting_morning_sent = False
+            greeting_night_sent = False
+
+        # Morning greeting window (7:30 AM - 7:31 AM)
+        morning_time = time(7, 30)
+        if morning_time <= current_time <= time(7, 31) and not greeting_morning_sent:
+            print("[AI] Sending morning greetings...")
+            groups = await db.get_all_ai_enabled_groups()
             for gid in groups:
                 await send_greeting_message(client, gid, "Good morning")
-        elif now == "22:30":
+            greeting_morning_sent = True
+
+        # Night greeting window (10:30 PM - 10:31 PM)
+        night_time = time(22, 30)
+        if night_time <= current_time <= time(22, 31) and not greeting_night_sent:
+            print("[AI] Sending night greetings...")
+            groups = await db.get_all_ai_enabled_groups()
             for gid in groups:
                 await send_greeting_message(client, gid, "Good night")
-        await asyncio.sleep(60)
+            greeting_night_sent = True
+        
+        await asyncio.sleep(50) # Check every 50 seconds
 
 
-# --- Run greeting task ---
+# --- Function to be called from main.py ---
 async def start_greeting_task(client: Client):
+    print("[AI] Starting greeting scheduler task.")
     asyncio.create_task(greeting_scheduler(client))
