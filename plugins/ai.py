@@ -34,23 +34,37 @@ greeting_morning_sent = False
 greeting_night_sent = False
 
 # ==========================================================
-#  /ai ON | OFF
+# ✨ Fancy Font Converter ✨
+# ==========================================================
+FANCY_FONT_MAP = {
+    'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ꜰ', 'g': 'ɢ', 'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ',
+    'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ', 'o': 'ᴏ', 'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ', 's': 'ꜱ', 't': 'ᴛ',
+    'u': 'ᴜ', 'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 'y': 'ʏ', 'z': 'ᴢ',
+    'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ꜰ', 'G': 'ɢ', 'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ',
+    'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ', 'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 'ꜱ', 'T': 'ᴛ',
+    'U': 'ᴜ', 'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': 'ʏ', 'Z': 'ᴢ'
+}
+
+def to_fancy_font(text: str) -> str:
+    """Converts a string to the fancy small-caps font."""
+    fancy_text = []
+    for char in text:
+        fancy_text.append(FANCY_FONT_MAP.get(char, char))
+    return "".join(fancy_text)
+
+
+# ==========================================================
+#  /ai ON | OFF (OWNER ONLY)
 # ==========================================================
 @Client.on_message(filters.command("ai") & filters.group)
 async def ai_toggle(client: Client, message: Message):
     chat_id = message.chat.id
     sender = message.from_user
 
-    try:
-        member = await client.get_chat_member(chat_id, sender.id)
-        is_admin = member.status in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER)
-    except Exception:
-        is_admin = False
-
     is_owner = sender.id in ADMIN_IDS if isinstance(ADMIN_IDS, (list, tuple, set)) else sender.id == ADMIN_IDS
 
-    if not (is_owner or is_admin):
-        await message.reply("❌ Only group admin or bot owner use panna mudiyum bro 😅")
+    if not is_owner:
+        await message.reply("❌ Only the bot owner can use this command.")
         return
 
     if len(message.command) < 2:
@@ -85,7 +99,9 @@ async def welcome_new_member(client: Client, message: Message):
     if not new_users:
         return
 
-    await message.reply("Hyy akka vanthurukken daa 👄")
+    welcome_text = "Hyy akka vanthurukken daa 👄"
+    fancy_welcome = to_fancy_font(welcome_text)
+    await message.reply(fancy_welcome)
 
 
 # ==========================================================
@@ -101,11 +117,10 @@ async def cache_media(client: Client, message: Message):
         gif_cache.append(message.animation.file_id)
 
 
+
+#  MAIN AI RESPONDER (FINAL & BEST VERSION)
 # ==========================================================
-#  MAIN AI RESPONDER
-# ==========================================================
-# --- THIS IS THE LINE THAT WAS FIXED ---
-@Client.on_message(filters.group & ~filters.command())
+@Client.on_message(filters.group & (filters.text | filters.sticker | filters.animation))
 async def ai_responder(client: Client, message: Message):
     if not groq_client:
         return
@@ -114,8 +129,10 @@ async def ai_responder(client: Client, message: Message):
         return
     if message.from_user and message.from_user.is_bot:
         return
-    if message.text and message.text.startswith('/'):
-        return
+
+    # --- This check is no longer needed because the filter handles it ---
+    # if message.text and message.text.startswith('/'):
+    #     return
 
     bot_name = client.me.first_name
     persona_prompt = (
@@ -136,6 +153,7 @@ async def ai_responder(client: Client, message: Message):
     if not direct_interaction and random.random() < 0.5:
         return
 
+    # --- Sticker/GIF replies ---
     if message.sticker or message.animation:
         if sticker_cache or gif_cache:
             if sticker_cache and gif_cache:
@@ -155,6 +173,7 @@ async def ai_responder(client: Client, message: Message):
             ]))
         return
 
+    # --- Spam / Link Filter ---
     try:
         member = await client.get_chat_member(chat_id, message.from_user.id)
         is_admin = member.status in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]
@@ -180,6 +199,7 @@ async def ai_responder(client: Client, message: Message):
             await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message.id)
         return
 
+    # --- Text Reply from Groq ---
     messages = [{"role": "system", "content": persona_prompt}]
     user_msg = message.text or message.caption or "User sent media."
     messages.append({"role": "user", "content": user_msg})
@@ -192,11 +212,13 @@ async def ai_responder(client: Client, message: Message):
             max_tokens=400,
         )
         ai_reply = response.choices[0].message.content
-        await message.reply(ai_reply)
+        
+        fancy_ai_reply = to_fancy_font(ai_reply)
+        
+        await message.reply(fancy_ai_reply)
     except Exception as e:
         print(f"[AI] Reply error: {e}")
         await message.reply("⚠️ Oru glitch vandhuduchu bro 😅 later try pannunga!")
-
 
 # ==========================================================
 #  AUTO GREETING SYSTEM
@@ -215,7 +237,11 @@ async def send_greeting_message(client: Client, chat_id: int, message_type: str)
             temperature=0.8,
             max_tokens=60,
         )
-        await client.send_message(chat_id, response.choices[0].message.content)
+        greeting_text = response.choices[0].message.content
+        
+        fancy_greeting = to_fancy_font(greeting_text)
+        
+        await client.send_message(chat_id, fancy_greeting)
     except Exception as e:
         print(f"[AI] Greeting error in {chat_id}: {e}")
 
