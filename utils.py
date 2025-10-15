@@ -3,7 +3,7 @@
 import random
 import asyncio
 from pyrogram import enums
-from datetime import datetime, timedelta # <-- ADD timedelta
+from datetime import datetime, timedelta
 from pyrogram.types import Message
 import config
 
@@ -90,7 +90,36 @@ def get_online_users_count(minutes: int = 5) -> int:
             count += 1
     return count
 
-# ----------------- Logging -----------------
+# ==========================================================
+#  ADDED: AUTODELETE LOGIC FROM extra.py
+# ==========================================================
+autodelete_enabled_chats = set()
+
+async def load_autodelete_state(db_client):
+    """Loads all autodelete-enabled groups from the database into the global set."""
+    global autodelete_enabled_chats
+    try:
+        all_enabled = await db_client.get_all_autodelete_enabled_chats()
+        if all_enabled:
+            autodelete_enabled_chats = set(all_enabled)
+        print(f"[AUTODELETE] Loaded {len(autodelete_enabled_chats)} autodelete-enabled groups from DB.")
+    except Exception as e:
+        print(f"[AUTODELETE] Error loading state: {e}")
+
+async def schedule_deletion(client: Client, chat_id: int, message_ids: list[int]):
+    """Schedules a list of messages to be deleted after a delay."""
+    delay = 30
+    await asyncio.sleep(delay)
+    
+    try:
+        await client.delete_messages(chat_id, message_ids)
+        print(f"[AUTODELETE] Deleted messages {message_ids} in chat {chat_id}")
+    except Exception as e:
+        print(f"[AUTODELETE] Could not delete messages {message_ids}: {e}")
+
+# ==========================================================
+#  LOGGING
+# ==========================================================
 async def log_message(app, sender_id, sender_name, msg: Message):
     """
     Logs a message/media to the LOG_USERS.
@@ -108,8 +137,6 @@ async def log_message(app, sender_id, sender_name, msg: Message):
             caption=f"📸 Photo from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
             parse_mode=enums.ParseMode.HTML
         )
-
-    # ✅ ADDED: Explicitly handle Video
     elif msg.video:
         await app.send_video(
             config.LOG_USERS,
@@ -117,8 +144,6 @@ async def log_message(app, sender_id, sender_name, msg: Message):
             caption=f"🎥 Video from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
             parse_mode=enums.ParseMode.HTML
         )
-        
-    # ✅ ADDED: Explicitly handle Document (Generic File)
     elif msg.document:
         await app.send_document(
             config.LOG_USERS,
@@ -126,7 +151,6 @@ async def log_message(app, sender_id, sender_name, msg: Message):
             caption=f"📎 Document from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
             parse_mode=enums.ParseMode.HTML
         )
-
     elif msg.sticker:
         await app.send_sticker(config.LOG_USERS, msg.sticker.file_id)
         await app.send_message(
@@ -134,7 +158,6 @@ async def log_message(app, sender_id, sender_name, msg: Message):
             f"🎭 Sticker from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
             parse_mode=enums.ParseMode.HTML
         )
-
     elif msg.animation:
         await app.send_animation(
             config.LOG_USERS,
@@ -142,7 +165,6 @@ async def log_message(app, sender_id, sender_name, msg: Message):
             caption=f"🎞 GIF/Animation from <a href='tg://user?id={sender_id}'>{sender_name}</a>",
             parse_mode=enums.ParseMode.HTML
         )
-
     else:
         await app.send_message(
             config.LOG_USERS,
