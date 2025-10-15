@@ -1,4 +1,4 @@
-import asyncio
+import asyncio  # <-- THIS IS THE MISSING LINE
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import PyMongoError, OperationFailure
 from config import MONGO_URI, MONGO_DB_NAME
@@ -8,9 +8,8 @@ class Database:
         self.client = AsyncIOMotorClient(mongo_uri)
         self.db = self.client[db_name]
         self.users = self.db["users"]
-        # NOTE: This collection now stores more than just AI settings.
-        # Consider renaming it to "group_settings" in the future for clarity.
         self.ai_settings = self.db["ai_settings"] 
+        self.autodelete_settings = self.db["autodelete_settings"]  # <-- NEW COLLECTION
 
     # ------------------- Connection -------------------
     async def connect(self):
@@ -20,25 +19,23 @@ class Database:
         self.client.close()
 
     # ------------------- User CRUD -------------------
-    async def add_user(self, user_id: int, profile: dict, user_type: str = "user"):
+    async def add_user(self, user_id: int, profile: dict):
         """
         Add a new user OR update existing profile.
         Keeps partner_id and status intact if user exists.
-        Added user_type parameter to distinguish between users and groups.
         """
         existing = await self.users.find_one({"_id": user_id})
         if existing:
             await self.users.update_one(
                 {"_id": user_id},
-                {"$set": {"profile": profile, "type": user_type}}
+                {"$set": {"profile": profile}}
             )
         else:
             await self.users.insert_one({
                 "_id": user_id,
                 "profile": profile,
                 "status": "idle",
-                "partner_id": None,
-                "type": user_type  # "user" or "group"
+                "partner_id": None
             })
  
     async def get_user(self, user_id: int):
@@ -68,6 +65,7 @@ class Database:
         """
         await self.reset_partner(user1)
         await self.reset_partner(user2)
+
 
     async def set_partners_atomic(self, user1: int, user2: int):
         """
@@ -105,7 +103,7 @@ class Database:
         print(f"Failed to set partners after {max_retries} attempts.")
         raise OperationFailure("Could not complete partner pairing after multiple retries.")
 
-    # ------------------- Group Settings (AI & AutoDelete) -------------------
+    # ------------------- Group Settings (AI) -------------------
     async def get_ai_status(self, chat_id: int) -> bool:
         """Checks if AI is enabled for a specific group using _id as the key."""
         settings = await self.ai_settings.find_one({"_id": chat_id})
@@ -120,43 +118,32 @@ class Database:
             upsert=True
         )
 
-    async def get_all_ai_enabled_chats(self):
-        """Returns a list of all chat IDs where AI is enabled."""
-        # Using self.ai_settings collection
-        chats = self.ai_settings.find({"ai_enabled": True}, {"_id": 1})
-        return [chat["_id"] async for chat in chats]
+    # ------------------- Group Settings (Autodelete) -------------------
+    # <-- NEW METHODS FOR AUTODELETE FEATURE
+    async def get_autodelete_status(self, chat_id: int) -> bool:
+        """Checks if autodelete is enabled for a specific group using _id as the key."""
+        settings = await self.autodelete_settings.find_one({"_id": chat_id})
+        # If settings exist, return its status; otherwise, default to False
+        return settings.get("autodelete_enabled", False) if settings else False
 
-    # --- NEW METHODS FOR AUTODELETE ---
-    async def set_autodelete(self, chat_id: int, status: bool):
-        """Enables or disables AutoDelete for a specific group."""
-        await self.ai_settings.update_one(
+    async def set_autodelete_status(self, chat_id: int, status: bool):
+        """Enables or disables autodelete for a specific group using _id as the key."""
+        await self.autodelete_settings.update_one(
             {"_id": chat_id},
             {"$set": {"autodelete_enabled": status}},
             upsert=True
         )
 
-    async def get_autodelete_status(self, chat_id: int) -> bool:
-        """Checks if AutoDelete is enabled for a specific group."""
-        settings = await self.ai_settings.find_one({"_id": chat_id})
-        return settings.get("autodelete_enabled", False) if settings else False
-
-    # ------------------- Statistics -------------------
-    async def get_total_users(self):
-        """Returns the total number of private users (positive IDs)."""
-        return await self.users.count_documents({"_id": {"$gt": 0}, "type": "user"})
-    
-    async def get_total_groups(self):
-        """Returns the total number of groups (negative IDs)."""
-        return await self.users.count_documents({"_id": {"$lt": 0}, "type": "group"})
-    
-    async def get_active_chats(self):
-        """Returns the number of active chats (users with status 'chatting')."""
-        return await self.users.count_documents({"status": "chatting", "type": "user"}) // 2
-
-    async def get_all_users(self):
-        """Returns a list of all private user IDs."""
-        users = self.users.find({"_id": {"$gt": 0}, "type": "user"}, {"_id": 1})
-        return [user["_id"] async for user in users]
+    async def get_all_autodelete_enabled_chats(self) -> set:
+        """
+        Gets all chat IDs where autodelete is enabled.
+        Returns a set of chat IDs.
+        """
+        cursor = self.autodelete_settings.find({"autodelete_enabled": True})
+        enabled_chats = set()
+        async for document in cursor:
+            enabled_chats.add(document["_id"])
+        return enabled_chats
 
 
 # ------------------- Shared instance -------------------
