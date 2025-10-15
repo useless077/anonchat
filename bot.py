@@ -11,7 +11,7 @@ from plugins.web_support import web_server
 
 # ✅ CORRECT IMPORT: We need the function that STARTS the scheduler
 from plugins.ai import load_ai_state, start_greeting_task
-from plugins.utils import load_autodelete_state # Assuming you moved the function here
+from utils import load_autodelete_state # Assuming you moved the function here
 
 # Configure logging
 logging.basicConfig(
