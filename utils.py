@@ -2,9 +2,9 @@
 
 import random
 import asyncio
-from pyrogram import enums
+from pyrogram import Client, filters, enums  # ✅ ADDING Client and enums HERE
+from pyrogram.types import Message              # ✅ ADDING Message HERE
 from datetime import datetime, timedelta
-from pyrogram.types import Message
 import config
 
 # ----------------- Active Users / Sessions -----------------
