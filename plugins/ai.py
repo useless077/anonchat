@@ -294,7 +294,6 @@ async def send_mixed_response(client: Client, chat_id: int, message_id: int, tex
 
     return sent_message
 
-
 # ==========================================================
 #  MAIN AI RESPONDER (MODIFIED FOR AUTODELETE)
 # ==========================================================
