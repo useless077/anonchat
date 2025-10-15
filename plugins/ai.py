@@ -10,6 +10,7 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import Message
 from config import GROQ_API_KEY, ADMIN_IDS
 from database.users import db
+from utils import autodelete_enabled_chats, schedule_deletion
 
 # --- MODEL NAME ---
 GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
