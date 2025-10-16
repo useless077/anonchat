@@ -111,6 +111,19 @@ class Database:
             upsert=True
         )
 
+    # ------------------- Helper / Utility Methods -------------------
+    async def get_total_users(self) -> int:
+        """Returns the total number of registered users."""
+        return await self.users.count_documents({})
+
+    async def get_all_ai_enabled_chats(self) -> set:
+        """Gets all chat IDs where AI is enabled."""
+        cursor = self.ai_settings.find({"ai_enabled": True})
+        enabled_chats = set()
+        async for document in cursor:
+            enabled_chats.add(document["_id"])
+        return enabled_chats
+
     # ------------------- Group Settings (Autodelete) -------------------
     async def get_autodelete_status(self, chat_id: int) -> bool:
         """Check if autodelete is enabled for a specific group."""
