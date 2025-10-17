@@ -387,7 +387,9 @@ async def end_chat(client: Client, message: Message):
 
 # ----------------- Relay Messages & Media -----------------
 
-@Client.on_message(filters.private, group=2)  # Use priority group
+# In partner.py, modify the relay_all function
+
+@Client.on_message(filters.private, group=2)
 async def relay_all(client: Client, message: Message):
     user_id = message.from_user.id
     
@@ -417,7 +419,17 @@ async def relay_all(client: Client, message: Message):
         return
 
     try:
-        await message.copy(chat_id=partner_id)
+        # Relay the message to partner
+        relayed_message = await message.copy(chat_id=partner_id)
+        
+        # Schedule auto-delete for non-text messages in private chats
+        if not message.text:  # If it's media (photo, video, sticker, etc.)
+            print(f"[AUTODELETE] Scheduling deletion of private media message {message.id}")
+            await schedule_deletion(client, message.chat.id, [message.id], delay=AUTO_DELETE_DELAY)
+            
+            # Also delete the relayed message in partner's chat
+            print(f"[AUTODELETE] Scheduling deletion of relayed message {relayed_message.id}")
+            await schedule_deletion(client, partner_id, [relayed_message.id], delay=AUTO_DELETE_DELAY)
         
         async def add_reaction():
             try:
@@ -449,7 +461,7 @@ async def relay_all(client: Client, message: Message):
         sessions.pop(user_id, None)
         await db.update_status(user_id, "idle")
         if partner_id:
-            await client.send_message(partner_id, "❌ **ᴄᴏɴᴇᴄᴛɪᴏɴ ʟᴏꜱᴛ ᴅᴜᴇ ᴛᴏ ᴀɴ ᴇʀʀᴏʀ. ᴜꜱᴇ /ꜱᴇᴀʀᴄʜ ᴛᴏ ꜰɪɴᴅ ᴀ ɴᴇᴡ ᴘᴀʀᴛɴᴇʀ.**")
+            await client.send_message(partner_id, "❌ **ᴄᴏɴɴᴇᴄᴛɪᴏɴ ʟᴏꜱᴛ ᴅᴜᴇ ᴛᴏ ᴀɴ ᴇʀʀᴏʀ. ᴜꜱᴇ /ꜱᴇᴀʀᴄʜ ᴛᴏ ꜰɪɴᴅ ᴀ ɴᴇᴡ ᴘᴀʀᴛɴᴇʀ.**")
             sessions.pop(partner_id, None)
             await db.reset_partners(user_id, partner_id)
             await db.update_status(partner_id, "idle")
