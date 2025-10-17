@@ -145,6 +145,23 @@ async def schedule_deletion(client: Client, chat_id: int, message_ids: list[int]
     except Exception as e:
         print(f"[AUTODELETE] Could not delete messages {message_ids}: {e}")
 
+async def check_idle_chats(send_message):
+    """Loop to disconnect users after idle time."""
+    while True:
+        now = datetime.utcnow()
+        to_remove = []
+        for user_id, last_active in list(chat_timers.items()):
+            if (now - last_active).total_seconds() > IDLE_CHAT_LIMIT:
+                partner_id = sessions.get(user_id)
+                if partner_id:
+                    await send_message(user_id, "⚠️ Chat closed due to inactivity.")
+                    await send_message(partner_id, "⚠️ Chat closed due to inactivity.")
+                    to_remove.append(user_id)
+                    to_remove.append(partner_id)
+        for u in set(to_remove):
+            remove_user(u)
+        await asyncio.sleep(60)
+
 # ==========================================================
 #  LOGGING
 # ==========================================================
