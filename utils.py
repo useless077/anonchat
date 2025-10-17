@@ -90,6 +90,25 @@ def get_online_users_count(minutes: int = 5) -> int:
             count += 1
     return count
 
+async def schedule_autodelete(message: Message, delay: int = 3600):
+    """
+    Auto-delete any message after `delay` seconds.
+    Default: 3600 seconds = 1 hour.
+    """
+    try:
+        await asyncio.sleep(delay)
+        await message.delete()
+    except Exception:
+        pass
+
+async def safe_reply(message: Message, text: str, **kwargs):
+    """
+    Reply and schedule auto-delete if needed.
+    """
+    sent = await message.reply_text(text, **kwargs)
+    await schedule_autodelete(sent)
+    return sent
+
 # ==========================================================
 #  ADDED: AUTODELETE LOGIC FROM extra.py
 # ==========================================================
