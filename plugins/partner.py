@@ -14,6 +14,7 @@ from utils import (
     sessions,
     start_profile_timer,
     log_message,
+    check_partner_wait,
 )
 from database.users import db
 
@@ -148,6 +149,8 @@ async def search_command(client: Client, message: Message):
 
         waiting_users.add(user_id)
         await message.reply_text("🔍 **ꜱᴇᴀʀᴄʜɪɴɢ ꜰᴏʀ ᴀ ᴘᴀʀᴛɴᴇʀ...**")
+
+        asyncio.create_task(check_partner_wait(client, user_id))
 
         if len(waiting_users) > 1:
             user1_id = waiting_users.pop()
