@@ -8,6 +8,7 @@ from aiohttp import web
 from config import API_ID, API_HASH, BOT_TOKEN, PORT, MONGO_URI, MONGO_DB_NAME, LOG_CHANNEL
 from database.users import Database
 from plugins.web_support import web_server
+from utils import check_idle_chats, safe_reply
 
 # ✅ CORRECT IMPORT: We need the function that STARTS the scheduler
 from plugins.ai import load_ai_state, start_greeting_task
@@ -65,6 +66,9 @@ class Bot(Client):
             # --- ✅ STEP 2: Start the background greeting scheduler task from ai.py ---
             logging.info("Starting AI greeting scheduler...")
             asyncio.create_task(start_greeting_task(self))
+            
+            logging.info("Starting idle chat checker...")
+            asyncio.create_task(check_idle_chats(lambda uid, text="⚠️ Chat closed due to inactivity.": safe_reply(bot.get_users(uid), text)))
             
         except Exception as e:
             logging.error(f"Failed to start the bot: {e}")
