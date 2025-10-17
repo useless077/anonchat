@@ -72,6 +72,15 @@ async def check_idle_chats(send_message):
             remove_user(u)
         await asyncio.sleep(60)
 
+async def check_partner_wait(user_id: int, send_message, wait_time: int = 120):
+    """
+    If a user is waiting for a partner for more than `wait_time` seconds,
+    send a reminder message.
+    """
+    await asyncio.sleep(wait_time)
+    if user_id in active_users and user_id not in sessions:
+        await send_message(user_id, "🤔 Oru partner kidaikka maatengala? Please wait... 😅")
+
 def update_activity(user_id: int):
     chat_timers[user_id] = datetime.utcnow()
     partner_id = sessions.get(user_id)
