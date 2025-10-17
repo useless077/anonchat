@@ -53,19 +53,20 @@ async def gender_cb(client, query):
     await query.answer(f"✅ Gender '{gender}' selected")
     await query.message.reply_text("**ɴᴏᴡ ꜱᴇɴᴅ ʏᴏᴜʀ ᴀɢᴇ (10-99):**")
 
-@Client.on_message(
-    filters.private & 
-    ~filters.command(["start","profile","search","next","end","myprofile","cancel"]) &
-    filters.create(lambda _, __, message: message.from_user.id in profile_states)
-)
+@Client.on_message(filters.private, group=1)  # Use priority group
 async def profile_steps(client, message):
-    print(f"[DEBUG] profile_steps handler called for user {message.from_user.id}")
-    
     user_id = message.from_user.id
     
+    # Skip if user is not in profile creation process
     if user_id not in profile_states: 
         return
-        
+    
+    # Skip if it's a command
+    if message.text and message.text.startswith('/'):
+        return
+    
+    print(f"[DEBUG] profile_steps handler called for user {message.from_user.id}")
+    
     profile_timeouts[user_id] = datetime.utcnow()
     step = profile_states[user_id]
     
@@ -316,8 +317,11 @@ async def next_cmd(client, message):
 
         await client.send_message(user_id, "🔄 **ꜱᴇᴀʀᴄʜɪɴɢ ꜰᴏʀ ɴᴇxᴛ ᴘᴀʀᴛɴᴇʀ...**")
         await client.send_message(partner_id, "❌ **ʏᴏᴜʀ ᴘᴀʀᴛɴᴇʀ ʟᴇꜰᴛ.**")
+        
+        # Call search_command directly instead of creating a new message object
         await search_command(client, message)
     else:
+        # Call search_command directly instead of creating a new message object
         await search_command(client, message)
 
 
@@ -383,10 +387,15 @@ async def end_chat(client: Client, message: Message):
 
 # ----------------- Relay Messages & Media -----------------
 
-@Client.on_message(filters.private & ~filters.command(["start","profile","search","next","end","myprofile","cancel"]))
+@Client.on_message(filters.private, group=2)  # Use priority group
 async def relay_all(client: Client, message: Message):
     user_id = message.from_user.id
-
+    
+    # Skip if it's a command
+    if message.text and message.text.startswith('/'):
+        return
+        
+    # Skip if user is in profile creation process
     if user_id in profile_states:
         return
 
@@ -440,7 +449,7 @@ async def relay_all(client: Client, message: Message):
         sessions.pop(user_id, None)
         await db.update_status(user_id, "idle")
         if partner_id:
-            await client.send_message(partner_id, "❌ **ᴄᴏɴɴᴇᴄᴛɪᴏɴ ʟᴏꜱᴛ ᴅᴜᴇ ᴛᴏ ᴀɴ ᴇʀʀᴏʀ. ᴜꜱᴇ /ꜱᴇᴀʀᴄʜ ᴛᴏ ꜰɪɴᴅ ᴀ ɴᴇᴡ ᴘᴀʀᴛɴᴇʀ.**")
+            await client.send_message(partner_id, "❌ **ᴄᴏɴᴇᴄᴛɪᴏɴ ʟᴏꜱᴛ ᴅᴜᴇ ᴛᴏ ᴀɴ ᴇʀʀᴏʀ. ᴜꜱᴇ /ꜱᴇᴀʀᴄʜ ᴛᴏ ꜰɪɴᴅ ᴀ ɴᴇᴡ ᴘᴀʀᴛɴᴇʀ.**")
             sessions.pop(partner_id, None)
             await db.reset_partners(user_id, partner_id)
             await db.update_status(partner_id, "idle")
