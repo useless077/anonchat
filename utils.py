@@ -6,6 +6,8 @@ from pyrogram import Client, filters, enums  # ✅ ADDING Client and enums HERE
 from pyrogram.types import Message              # ✅ ADDING Message HERE
 from datetime import datetime, timedelta
 import config
+from plugins.partner import waiting_users
+
 
 # ----------------- Active Users / Sessions -----------------
 active_users = set()  # user_id
@@ -72,14 +74,17 @@ async def check_idle_chats(send_message):
             remove_user(u)
         await asyncio.sleep(60)
 
-async def check_partner_wait(user_id: int, send_message, wait_time: int = 120):
+
+async def check_partner_wait(client, user_id: int, wait_time: int = 120):
     """
-    If a user is waiting for a partner for more than `wait_time` seconds,
-    send a reminder message.
+    Alert user if they are still waiting for a partner after `wait_time` seconds.
     """
     await asyncio.sleep(wait_time)
-    if user_id in active_users and user_id not in sessions:
-        await send_message(user_id, "🤔 Oru partner kidaikka maatengala? Please wait... 😅")
+    if user_id in waiting_users:
+        try:
+            await client.send_message(user_id, "🤔 Oru partner kidaikka maatengala? Please wait... 😅")
+        except Exception:
+            pass
 
 def update_activity(user_id: int):
     chat_timers[user_id] = datetime.utcnow()
