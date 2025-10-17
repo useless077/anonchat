@@ -16,6 +16,7 @@ chat_timers = {}      # user_id -> datetime of last message
 # Constants
 IDLE_CHAT_LIMIT = 15 * 60  # 15 min
 PROFILE_TIMEOUT = 5 * 60   # 5 min
+delete_delay = 3600  # 1 hour
 
 # ----------------- User Management -----------------
 def add_user(user_id: int):
@@ -108,6 +109,14 @@ async def safe_reply(message: Message, text: str, **kwargs):
     sent = await message.reply_text(text, **kwargs)
     await schedule_autodelete(sent)
     return sent
+
+async def schedule_deletion(client: Client, chat_id: int, message_ids: list[int], delay: int = delete_delay):
+    await asyncio.sleep(delay)
+    try:
+        await client.delete_messages(chat_id, message_ids)
+        print(f"[AUTODELETE] Deleted messages {message_ids} in chat {chat_id}")
+    except Exception as e:
+        print(f"[AUTODELETE] Could not delete messages {message_ids}: {e}")
 
 # ==========================================================
 #  ADDED: AUTODELETE LOGIC FROM extra.py
