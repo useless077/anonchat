@@ -5,9 +5,7 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import Message
 from config import ADMIN_IDS, LOG_CHANNEL
 from database.users import db
-from utils import get_online_users_count, schedule_deletion, autodelete_enabled_chats
-
-delete_delay = 3600  # 1 hour
+from utils import get_online_users_count, schedule_deletion, autodelete_enabled_chats, AUTO_DELETE_DELAY
 
 # --- BROADCAST COMMAND ---
 @Client.on_message(filters.private & filters.command("broadcast") & filters.user(ADMIN_IDS))
@@ -74,14 +72,6 @@ async def status_cmd(client: Client, message: Message):
 
     await message.reply(status_text, parse_mode=enums.ParseMode.MARKDOWN)
 
-# --- PRIVATE AUTO DELETE ---
-@Client.on_message(~filters.text & filters.private)
-async def auto_delete_private(client: Client, message: Message):
-    """
-    Auto-delete any non-text messages in private after 1 hour.
-    """
-    await schedule_deletion(client, message.chat.id, [message.id], delay=delete_delay)
-
 # --- AUTODELETE COMMAND (group only) ---
 @Client.on_message(filters.command("autodelete") & filters.group)
 async def toggle_autodelete(client: Client, message: Message):
@@ -115,11 +105,13 @@ async def toggle_autodelete(client: Client, message: Message):
         return await message.reply("⚠️ Something went wrong while processing this command.")
 
 # --- GROUP AUTO DELETE MEDIA ---
-@Client.on_message(filters.group & filters.media, group=99)
+@Client.on_message(filters.group & filters.media, group=2)
 async def auto_delete_group_media(client: Client, message: Message):
     """
     Delete media messages in groups if autodelete is enabled.
     """
     if message.chat.id not in autodelete_enabled_chats:
         return
-    await schedule_deletion(client, message.chat.id, [message.id], delay=delete_delay)
+    
+    print(f"[AUTODELETE] Scheduling deletion of group media message {message.id} in chat {message.chat.id}")
+    await schedule_deletion(client, message.chat.id, [message.id], delay=AUTO_DELETE_DELAY)
