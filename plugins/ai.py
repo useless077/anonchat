@@ -10,7 +10,7 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import Message
 from config import GROQ_API_KEY, ADMIN_IDS
 from database.users import db
-from utils import autodelete_enabled_chats, schedule_deletion
+from utils import autodelete_enabled_chats, schedule_deletion, AUTO_DELETE_DELAY
 
 # --- MODEL NAME ---
 GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
@@ -167,10 +167,10 @@ async def welcome_new_member(client: Client, message: Message):
             if should_use_fancy_font():
                 welcome_text = to_fancy_font(welcome_text)
             
-            # --- CHANGE 1: Capture the message object for autodelete ---
+            # Send welcome message and capture for auto-delete
             sent_message = await message.reply(welcome_text)
 
-            # --- CHANGE 2: Schedule deletion if autodelete is enabled ---
+            # Schedule deletion if autodelete is enabled
             if chat_id in autodelete_enabled_chats and sent_message:
                 asyncio.create_task(schedule_deletion(client, chat_id, [sent_message.id]))
                 
@@ -180,10 +180,10 @@ async def welcome_new_member(client: Client, message: Message):
             if should_use_fancy_font():
                  fallback_text = to_fancy_font(fallback_text)
             
-            # --- CHANGE 3: Capture the message object for autodelete ---
+            # Send fallback message and capture for auto-delete
             sent_message = await message.reply(fallback_text)
 
-            # --- CHANGE 4: Schedule deletion if autodelete is enabled ---
+            # Schedule deletion if autodelete is enabled
             if chat_id in autodelete_enabled_chats and sent_message:
                 asyncio.create_task(schedule_deletion(client, chat_id, [sent_message.id]))
 
@@ -239,65 +239,78 @@ async def generate_ai_reply(client: Client, message: Message, user_input: str) -
         return "⚠️ Oru glitch vandhuduchu bro 😅 later try pannunga!" if should_use_emojis() else "⚠️ Oru glitch vandhuduchu bro later try pannunga!"
 
 # ==========================================================
-#  MIXED RESPONSE HELPER (MODIFIED TO RETURN MESSAGE)
+#  MIXED RESPONSE HELPER (FIXED TO RETURN ALL MESSAGE IDs)
 # ==========================================================
 async def send_mixed_response(client: Client, chat_id: int, message_id: int, text_reply: str = None):
-    """Send a mixed response with text, emojis, and possibly media. Returns the sent message object."""
+    """Send a mixed response with text, emojis, and possibly media. Returns all sent message IDs."""
     response_type = random.choice(["text_only", "text_emoji", "text_media", "media_only"])
-    sent_message = None
+    sent_message_ids = []  # Store all message IDs
     
     if response_type in ["text_only", "text_emoji"] and text_reply:
         if should_use_fancy_font():
             text_reply = to_fancy_font(text_reply)
-        sent_message = await client.send_message(chat_id, text_reply, reply_to_message_id=message_id)
+        sent_msg = await client.send_message(chat_id, text_reply, reply_to_message_id=message_id)
+        sent_message_ids.append(sent_msg.id)
     
     elif response_type == "text_media" and text_reply:
         if should_use_fancy_font():
             text_reply = to_fancy_font(text_reply)
-        sent_message = await client.send_message(chat_id, text_reply, reply_to_message_id=message_id)
+        sent_msg = await client.send_message(chat_id, text_reply, reply_to_message_id=message_id)
+        sent_message_ids.append(sent_msg.id)
         
         await asyncio.sleep(0.5)
         
+        # Send media after text
         if sticker_cache and gif_cache:
             if random.choice([True, False]):
-                await client.send_sticker(chat_id, random.choice(list(sticker_cache)), reply_to_message_id=message_id)
+                media_msg = await client.send_sticker(chat_id, random.choice(list(sticker_cache)), reply_to_message_id=message_id)
+                sent_message_ids.append(media_msg.id)
             else:
-                await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message_id)
+                media_msg = await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message_id)
+                sent_message_ids.append(media_msg.id)
         elif sticker_cache:
-            await client.send_sticker(chat_id, random.choice(list(sticker_cache)), reply_to_message_id=message_id)
+            media_msg = await client.send_sticker(chat_id, random.choice(list(sticker_cache)), reply_to_message_id=message_id)
+            sent_message_ids.append(media_msg.id)
         elif gif_cache:
-            await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message_id)
+            media_msg = await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message_id)
+            sent_message_ids.append(media_msg.id)
     
     elif response_type == "media_only":
-        # This is the part that was failing
+        # Send only media
         if sticker_cache and gif_cache:
             if random.choice([True, False]):
-                sent_message = await client.send_sticker(chat_id, random.choice(list(sticker_cache)), reply_to_message_id=message_id)
+                media_msg = await client.send_sticker(chat_id, random.choice(list(sticker_cache)), reply_to_message_id=message_id)
+                sent_message_ids.append(media_msg.id)
             else:
-                sent_message = await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message_id)
+                media_msg = await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message_id)
+                sent_message_ids.append(media_msg.id)
         elif sticker_cache:
-            sent_message = await client.send_sticker(chat_id, random.choice(list(sticker_cache)), reply_to_message_id=message_id)
+            media_msg = await client.send_sticker(chat_id, random.choice(list(sticker_cache)), reply_to_message_id=message_id)
+            sent_message_ids.append(media_msg.id)
         elif gif_cache:
-            sent_message = await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message_id)
+            media_msg = await client.send_animation(chat_id, random.choice(list(gif_cache)), reply_to_message_id=message_id)
+            sent_message_ids.append(media_msg.id)
         else:
-            # --- FIX 1: If cache is empty, fall back to text reply ---
+            # If cache is empty, fall back to text reply
             if text_reply:
                 if should_use_fancy_font():
                     text_reply = to_fancy_font(text_reply)
-                sent_message = await client.send_message(chat_id, text_reply, reply_to_message_id=message_id)
+                sent_msg = await client.send_message(chat_id, text_reply, reply_to_message_id=message_id)
+                sent_message_ids.append(sent_msg.id)
 
-    # --- FIX 2: If nothing was sent for any reason, send the text as a last resort ---
-    if not sent_message and text_reply:
+    # If nothing was sent for any reason, send the text as a last resort
+    if not sent_message_ids and text_reply:
         if should_use_fancy_font():
             text_reply = to_fancy_font(text_reply)
-        sent_message = await client.send_message(chat_id, text_reply, reply_to_message_id=message_id)
+        sent_msg = await client.send_message(chat_id, text_reply, reply_to_message_id=message_id)
+        sent_message_ids.append(sent_msg.id)
 
-    return sent_message
+    return sent_message_ids  # Return list of all message IDs
 
 # ==========================================================
-#  MAIN AI RESPONDER (MODIFIED FOR AUTODELETE)
+#  MAIN AI RESPONDER (FIXED FOR COMPLETE AUTO-DELETE)
 # ==========================================================
-@Client.on_message(filters.group & ~filters.command(["ai", "autodelete", "start", "search", "next", "end", "myprofile", "profile"]))
+@Client.on_message(filters.group & ~filters.command(["ai", "autodelete", "start", "search", "next", "end", "myprofile", "profile", "cancel"]))
 async def ai_responder(client: Client, message: Message):
     if not groq_client:
         return
@@ -335,7 +348,7 @@ async def ai_responder(client: Client, message: Message):
     print(f"[AI] Processing message: {message.text or 'Media'} from {message.from_user.first_name} in chat {chat_id}")
     print(f"[AI] Direct interaction: {direct_interaction}, Sticker: {bool(message.sticker)}, GIF: {bool(message.animation)}")
 
-    bot_message = None
+    bot_message_ids = []
     ai_reply_text = None
 
     # --- 1. Handle Sticker/GIF replies ---
@@ -346,8 +359,10 @@ async def ai_responder(client: Client, message: Message):
     # --- 2. Handle Hardcoded Text Responses ---
     elif message.text:
         text = message.text.lower()
-        if text == "hi": ai_reply_text = await generate_ai_reply(client, message, "User said 'hi', greet them back in a funny way in Tanglish.")
-        elif text in ["bye", "sari", "kilampu"]: ai_reply_text = await generate_ai_reply(client, message, f"User said '{text}', respond in a funny way in Tanglish.")
+        if text == "hi": 
+            ai_reply_text = await generate_ai_reply(client, message, "User said 'hi', greet them back in a funny way in Tanglish.")
+        elif text in ["bye", "sari", "kilampu"]: 
+            ai_reply_text = await generate_ai_reply(client, message, f"User said '{text}', respond in a funny way in Tanglish.")
 
     # --- 3. Handle Tagged Messages ---
     if direct_interaction and not ai_reply_text:
@@ -355,64 +370,80 @@ async def ai_responder(client: Client, message: Message):
         ai_reply_text = await generate_ai_reply(client, message, f"User tagged you or replied to you: '{user_msg}', respond in a funny way in Tanglish.")
 
     # --- 4. Handle Random Interactions ---
-    if not direct_interaction and not ai_reply_text and random.random() > 0.5: return
+    if not direct_interaction and not ai_reply_text and random.random() > 0.5: 
+        return
     if not ai_reply_text:
         await client.send_chat_action(chat_id, enums.ChatAction.TYPING)
         user_msg = message.text or message.caption or "User sent media."
         ai_reply_text = await generate_ai_reply(client, message, user_msg)
 
-    # --- 5. Send Response and Schedule Deletion ---
+    # --- 5. Send Response and Capture All Message IDs ---
     if ai_reply_text:
-        # --- CHANGE 12: Capture the returned message object ---
-        bot_message = await send_mixed_response(client, chat_id, message.id, ai_reply_text)
+        bot_message_ids = await send_mixed_response(client, chat_id, message.id, ai_reply_text)
 
-    # --- CHANGE 13: INTEGRATE WITH AUTODELETE ---
+    # --- 6. Schedule Auto-Delete for All Messages ---
     if chat_id in autodelete_enabled_chats:
-        ids_to_delete = [message.id]
-        if bot_message:
-            ids_to_delete.append(bot_message.id)
+        ids_to_delete = [message.id]  # Original user message
+        if bot_message_ids:           # All AI response message IDs (text + media)
+            ids_to_delete.extend(bot_message_ids)
         asyncio.create_task(schedule_deletion(client, chat_id, ids_to_delete))
 
 # ==========================================================
-#  AUTO GREETING SYSTEM (MODIFIED FOR AUTODELETE)
+#  AUTO GREETING SYSTEM (FIXED FOR AUTO-DELETE)
 # ==========================================================
 async def send_greeting_message(client: Client, chat_id: int, message_type: str):
-    if not groq_client: return
+    if not groq_client: 
+        return
     try:
         bot_name = client.me.first_name
         use_emojis = should_use_emojis()
         emoji_instruction = "Use appropriate emojis" if use_emojis else "Do not use any emojis"
         response = groq_client.chat.completions.create(
             model=GROQ_MODEL_NAME,
-            messages=[{"role": "system", "content": f"You are {bot_name}, a cheerful Tanglish friend. Generate a short '{message_type}' message."}, {"role": "user", "content": f"Write a short '{message_type}' greeting in Tanglish slang. {emoji_instruction}. Keep it under 60 characters."}],
-            temperature=0.8, max_tokens=60,
+            messages=[
+                {"role": "system", "content": f"You are {bot_name}, a cheerful Tanglish friend. Generate a short '{message_type}' message."}, 
+                {"role": "user", "content": f"Write a short '{message_type}' greeting in Tanglish slang. {emoji_instruction}. Keep it under 60 characters."}
+            ],
+            temperature=0.8, 
+            max_tokens=60,
         )
         greeting_text = response.choices[0].message.content
-        if not use_emojis: greeting_text = remove_emojis(greeting_text)
+        if not use_emojis: 
+            greeting_text = remove_emojis(greeting_text)
         fancy_greeting = to_fancy_font(greeting_text)
         
-        # --- CHANGE 14: Capture the sent message ---
+        # Send greeting and capture for auto-delete
         bot_message = await client.send_message(chat_id, fancy_greeting)
         
-        # --- CHANGE 15: Schedule deletion if autodelete is enabled ---
+        # Schedule deletion if autodelete is enabled
         if chat_id in autodelete_enabled_chats and bot_message:
             asyncio.create_task(schedule_deletion(client, chat_id, [bot_message.id]))
 
-    except Exception as e: print(f"[AI] Greeting error in {chat_id}: {e}")
+    except Exception as e: 
+        print(f"[AI] Greeting error in {chat_id}: {e}")
 
 async def greeting_scheduler(client: Client):
     global greeting_morning_sent, greeting_night_sent
     while True:
         now = datetime.now().time()
-        if now.hour == 0 and now.minute == 0: greeting_morning_sent = greeting_night_sent = False
+        # Reset flags at midnight
+        if now.hour == 0 and now.minute == 0: 
+            greeting_morning_sent = greeting_night_sent = False
+        
+        # Send morning greeting at 7:30 AM
         if now.hour == 7 and now.minute == 30 and not greeting_morning_sent:
             print("[AI] Sending morning greetings...")
-            for gid in ai_enabled_groups: await send_greeting_message(client, gid, "Good morning")
+            for gid in ai_enabled_groups: 
+                await send_greeting_message(client, gid, "Good morning")
             greeting_morning_sent = True
+        
+        # Send night greeting at 10:30 PM
         elif now.hour == 22 and now.minute == 30 and not greeting_night_sent:
             print("[AI] Sending night greetings...")
-            for gid in ai_enabled_groups: await send_greeting_message(client, gid, "Good night")
+            for gid in ai_enabled_groups: 
+                await send_greeting_message(client, gid, "Good night")
             greeting_night_sent = True
+        
         await asyncio.sleep(60)
 
 async def start_greeting_task(client: Client):
