@@ -15,6 +15,9 @@ from utils import (
     start_profile_timer,
     log_message,
     check_partner_wait,
+    send_search_progress,
+    cancel_search,
+    waiting_users,  # Import waiting_users from utils
 )
 from database.users import db
 
@@ -22,11 +25,9 @@ from database.users import db
 profile_states = {}
 profile_data = {}
 profile_timeouts = {}
-waiting_users = set()
 waiting_lock = asyncio.Lock()
 search_flood = {} # user_id -> datetime of last search
 
-CONNECTION_EMOJIS = ["🎉", "🥳", "🎊", "✨", "🤝", "💫", "🌟", "🎈"]
 REACTION_EMOJIS = ["👍", "👌", "❤️", "🥰", "😊", "✅", "👏", "😍"]
 CONNECTION_STICKER_ID = "CAACAgUAAyEFAASH239qAAPmaNu1X46I2IKBOBtfNH3ot9jO0MsAAmIaAAKEFOBWbLL49T60Z7QeBA"
 
@@ -54,7 +55,7 @@ async def gender_cb(client, query):
 
 @Client.on_message(
     filters.private & 
-    ~filters.command(["start","profile","search","next","end","myprofile"]) &
+    ~filters.command(["start","profile","search","next","end","myprofile","cancel"]) &
     filters.create(lambda _, __, message: message.from_user.id in profile_states)
 )
 async def profile_steps(client, message):
@@ -123,6 +124,17 @@ async def myprofile_cmd(client, message):
     caption += f"• **ʟᴏᴄᴀᴛɪᴏɴ:** {profile.get('location','')}\n"
     await message.reply_text(caption, parse_mode=enums.ParseMode.HTML)
 
+# ----------------- Cancel Search -----------------
+@Client.on_message(filters.private & filters.command("cancel"))
+async def cancel_search_cmd(client, message):
+    """Allow users to cancel their partner search."""
+    user_id = message.from_user.id
+    
+    if await cancel_search(user_id):
+        await message.reply_text("❌ **ꜱᴇᴀʀᴄʜ ᴄᴀɴᴄᴇʟʟᴇᴅ.**")
+    else:
+        await message.reply_text("⚠️ **ʏᴏᴜ ᴀʀᴇ ɴᴏᴛ ꜱᴇᴀʀᴄʜɪɴɢ ꜰᴏʀ ᴀ ᴘᴀʀᴛɴᴇʀ ʀɪɢʜᴛ ɴᴏᴡ.**")
+
 # ----------------- Search Partner -----------------
 @Client.on_message(filters.command("search"))
 async def search_command(client: Client, message: Message):
@@ -150,7 +162,11 @@ async def search_command(client: Client, message: Message):
         waiting_users.add(user_id)
         await message.reply_text("🔍 **ꜱᴇᴀʀᴄʜɪɴɢ ꜰᴏʀ ᴀ ᴘᴀʀᴛɴᴇʀ...**")
 
+        # Start the timeout task
         asyncio.create_task(check_partner_wait(client, user_id))
+        
+        # Start the progress indicator
+        asyncio.create_task(send_search_progress(client, user_id))
 
         if len(waiting_users) > 1:
             user1_id = waiting_users.pop()
@@ -367,7 +383,7 @@ async def end_chat(client: Client, message: Message):
 
 # ----------------- Relay Messages & Media -----------------
 
-@Client.on_message(filters.private & ~filters.command(["start","profile","search","next","end","myprofile"]))
+@Client.on_message(filters.private & ~filters.command(["start","profile","search","next","end","myprofile","cancel"]))
 async def relay_all(client: Client, message: Message):
     user_id = message.from_user.id
 
