@@ -3,11 +3,11 @@ import asyncio
 from datetime import datetime
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
-from config import ADMIN_IDS
+from config import ADMIN_IDS, LOG_CHANNEL
 from database.users import db
-from utils import get_online_users_count
+from utils import get_online_users_count, schedule_deletion, autodelete_enabled_chats
 
-delete_delay = 3600  # 1 hour (in seconds)
+delete_delay = 3600  # 1 hour
 
 # --- BROADCAST COMMAND ---
 @Client.on_message(filters.private & filters.command("broadcast") & filters.user(ADMIN_IDS))
@@ -32,7 +32,7 @@ async def broadcast_cmd(client: Client, message: Message):
         try:
             await client.send_message(user_id, broadcast_text)
             success_count += 1
-            await asyncio.sleep(0.1)  # small delay to avoid flood
+            await asyncio.sleep(0.1)
         except Exception as e:
             failed_count += 1
             error_text = str(e).upper()
@@ -74,6 +74,14 @@ async def status_cmd(client: Client, message: Message):
 
     await message.reply(status_text, parse_mode=enums.ParseMode.MARKDOWN)
 
+# --- PRIVATE AUTO DELETE ---
+@Client.on_message(~filters.text & filters.private)
+async def auto_delete_private(client: Client, message: Message):
+    """
+    Auto-delete any non-text messages in private after 1 hour.
+    """
+    await schedule_deletion(client, message.chat.id, [message.id], delay=delete_delay)
+
 # --- AUTODELETE COMMAND (group only) ---
 @Client.on_message(filters.command("autodelete") & filters.group)
 async def toggle_autodelete(client: Client, message: Message):
@@ -87,7 +95,6 @@ async def toggle_autodelete(client: Client, message: Message):
         if not bot_member.privileges or not getattr(bot_member.privileges, "can_delete_messages", False):
             return await message.reply("⚠️ I need 'Delete Messages' permission to manage autodelete.")
 
-        # parse argument
         arg = message.command[1].lower() if len(message.command) > 1 else None
         if not arg:
             status = await db.get_autodelete_status(message.chat.id)
@@ -95,9 +102,11 @@ async def toggle_autodelete(client: Client, message: Message):
 
         if arg == "on":
             await db.set_autodelete_status(message.chat.id, True)
+            autodelete_enabled_chats.add(message.chat.id)
             return await message.reply("🧹 AutoDelete **enabled** — media will be deleted after 1 hour.")
         elif arg == "off":
             await db.set_autodelete_status(message.chat.id, False)
+            autodelete_enabled_chats.discard(message.chat.id)
             return await message.reply("🧹 AutoDelete **disabled**.")
         else:
             return await message.reply("Usage: `/autodelete on` or `/autodelete off`")
@@ -105,28 +114,12 @@ async def toggle_autodelete(client: Client, message: Message):
         print(f"[AutoDelete Command] Error: {e}")
         return await message.reply("⚠️ Something went wrong while processing this command.")
 
-# --- AUTO DELETE MEDIA HANDLER ---
+# --- GROUP AUTO DELETE MEDIA ---
 @Client.on_message(filters.group & filters.media, group=99)
-async def auto_delete_media(client: Client, message: Message):
-    # Canary log
-    print(f"[AutoDelete Media] Message {message.id} in chat {message.chat.id}")
-
-    try:
-        enabled = await db.get_autodelete_status(message.chat.id)
-        if not enabled:
-            return
-    except Exception as e:
-        print(f"[AutoDelete Media] Error checking DB: {e}")
+async def auto_delete_group_media(client: Client, message: Message):
+    """
+    Delete media messages in groups if autodelete is enabled.
+    """
+    if message.chat.id not in autodelete_enabled_chats:
         return
-
-    # schedule deletion
-    asyncio.create_task(_delete_message_after_delay(client, message.chat.id, message.id))
-
-async def _delete_message_after_delay(client: Client, chat_id: int, message_id: int):
-    print(f"[AutoDelete Task] Will delete message {message_id} from {chat_id} after {delete_delay} seconds.")
-    await asyncio.sleep(delete_delay)
-    try:
-        await client.delete_messages(chat_id, message_id)
-        print(f"[AutoDelete Task] Deleted message {message_id} from chat {chat_id}")
-    except Exception as e:
-        print(f"[AutoDelete Task] Failed to delete message {message_id} in chat {chat_id}: {e}")
+    await schedule_deletion(client, message.chat.id, [message.id], delay=delete_delay)
