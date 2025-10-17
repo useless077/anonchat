@@ -75,16 +75,33 @@ async def check_idle_chats(send_message):
         await asyncio.sleep(60)
 
 
+# In utils.py, modify the existing check_partner_wait function
+
 async def check_partner_wait(client, user_id: int, wait_time: int = 120):
     """
-    Alert user if they are still waiting for a partner after `wait_time` seconds.
+    Check if user is still waiting for a partner after wait_time seconds.
+    If still waiting, send a "no partner found" message and remove from waiting list.
     """
     await asyncio.sleep(wait_time)
+    
+    # Check if user is still in waiting list
     if user_id in waiting_users:
         try:
-            await client.send_message(user_id, "🤔 Oru partner kidaikka maatengala? Please wait... 😅")
-        except Exception:
-            pass
+            # Remove from waiting list
+            waiting_users.discard(user_id)
+            
+            # Send "no partner found" message
+            await client.send_message(
+                user_id, 
+                "😔 **ꜱᴏʀʀʏ, ɴᴏ ᴘᴀʀᴛɴᴇʀ ꜰᴏᴜɴᴅ ʀɪɢʜᴛ ɴᴏᴡ.**\n\n"
+                "ᴛʀʏ ꜱᴇᴀʀᴄʜɪɴɢ ᴀɢᴀɪɴ ɪɴ ᴀ ꜰᴇᴡ ᴍɪɴᴜᴛᴇꜱ ᴏʀ ᴛʀʏ ᴅɪꜰꜰᴇʀᴇɴᴛ ᴛɪᴍᴇꜱ ᴏꜰ ᴛʜᴇ ᴅᴀʏ ᴡʜᴇɴ ᴍᴏʀᴇ ᴜꜱᴇʀꜱ ᴀʀᴇ ᴀᴄᴛɪᴠᴇ."
+            )
+            
+            # Log the timeout
+            print(f"[SEARCH] User {user_id} timed out after {wait_time} seconds without finding a partner")
+            
+        except Exception as e:
+            print(f"[SEARCH] Error sending timeout message to {user_id}: {e}")
 
 def update_activity(user_id: int):
     chat_timers[user_id] = datetime.utcnow()
