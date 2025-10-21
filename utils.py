@@ -100,30 +100,26 @@ async def send_search_progress(client, user_id: int):
                 break
                 
 async def check_partner_wait(client, user_id: int, wait_time: int = SEARCH_TIMEOUT):
-    """
-    Check if user is still waiting for a partner after wait_time seconds.
-    If still waiting, send a "no partner found" message and remove from waiting list.
-    """
-    await asyncio.sleep(wait_time)
-    
-    # Check if user is still in waiting list
-    if user_id in waiting_users:
-        try:
-            # Remove from waiting list
+    try:
+        print(f"[DEBUG] check_partner_wait STARTED for {user_id} ({wait_time}s)")
+        await asyncio.sleep(wait_time)
+        print(f"[DEBUG] Finished waiting for {user_id}")
+
+        if user_id in waiting_users:
+            print(f"[DEBUG] {user_id} still in waiting_users after timeout, sending message...")
             waiting_users.discard(user_id)
-            
-            # Send "no partner found" message
             await client.send_message(
-                user_id, 
-                "😔 **ꜱᴏʀʀʏ, ɴᴏ ᴘᴀʀᴛɴᴇʀ ꜰᴏᴜɴᴅ ʀɪɢʜᴛ ɴᴏᴡ.**\n\n"
-                "ᴛʀʏ ꜱᴇᴀʀᴄʜɪɴɢ ᴀɢᴀɪɴ ɪɴ ᴀ ꜰᴇᴡ ᴍɪɴᴜᴛᴇꜱ ᴏʀ ᴛʀʏ ᴅɪꜰꜰᴇʀᴇɴᴛ ᴛɪᴍᴇꜱ ᴏꜰ ᴛʜᴇ ᴅᴀʏ ᴡʜᴇɴ ᴍᴏʀᴇ ᴜꜱᴇʀꜱ ᴀʀᴇ ᴀᴄᴛɪᴠᴇ."
+                user_id,
+                "😔 **No partner found yet.**\nPlease try again later."
             )
-            
-            # Log the timeout
-            print(f"[SEARCH] User {user_id} timed out after {wait_time} seconds without finding a partner")
-            
-        except Exception as e:
-            print(f"[SEARCH] Error sending timeout message to {user_id}: {e}")
+            print(f"[DEBUG] Timeout message sent to {user_id}")
+        else:
+            print(f"[DEBUG] {user_id} NOT in waiting_users after timeout (maybe matched/cancelled)")
+    except asyncio.CancelledError:
+        print(f"[DEBUG] check_partner_wait CANCELLED for {user_id}")
+    except Exception as e:
+        print(f"[DEBUG] ERROR in check_partner_wait for {user_id}: {e}")
+
 
 async def cancel_search(user_id: int):
     """Cancel search for a user (could be used by multiple modules)"""
