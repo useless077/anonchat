@@ -14,6 +14,8 @@ insta_client = InstaClient()
 INSTA_SESSION_FILE = "sessions/insta_session.json"
 os.makedirs("sessions", exist_ok=True)
 
+DEFAULT_CAPTION = "🎬 Watch this amazing video on Instagram! #TamilBots"  # Auto caption
+
 def check_insta_session():
     """Check if Instagram session exists and is valid."""
     if not os.path.exists(INSTA_SESSION_FILE):
@@ -43,12 +45,14 @@ async def insta_post(client: Client, message: Message):
         await message.reply("❌ Reply to a Telegram video to post.")
         return
 
-    caption = " ".join(message.command[1:]) or ""
+    # Use user-provided caption or default
+    caption = " ".join(message.command[1:]) or DEFAULT_CAPTION
     file_path = await message.reply_to_message.download()
     await message.reply("📤 Uploading video to Instagram Reels...")
 
     try:
-        insta_client.video_upload(file_path, caption=caption, reels=True)
+        # Upload as Reel
+        insta_client.clip_upload(file_path, caption=caption)
         await message.reply("✅ Uploaded successfully to Instagram Reels!")
     except Exception as e:
         logger.error(f"Instagram upload failed: {e}")
