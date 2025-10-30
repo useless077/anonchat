@@ -4,7 +4,7 @@ import sys
 import asyncio
 from pyrogram import Client
 from aiohttp import web
-from config import API_ID, API_HASH, BOT_TOKEN, PORT, MONGO_URI, MONGO_DB_NAME, LOG_CHANNEL, WEBHOOK
+from config import API_ID, API_HASH, BOT_TOKEN, PORT, MONGO_URI, MONGO_DB_NAME, LOG_CHANNEL
 from database.users import Database
 from plugins.web_support import web_server
 from utils import check_idle_chats, safe_reply
@@ -51,18 +51,13 @@ class Bot(Client):
                 check_idle_chats(lambda uid, text="⚠️ Chat closed due to inactivity.": safe_reply(self.get_users(uid), text))
             )
 
-            # Start aiohttp server for webhook
+            # Start aiohttp server for /insta_login page
             web_app = await web_server()
-            # Add Pyrogram webhook handler
-            self.add_webhook(web_app)
             runner = web.AppRunner(web_app)
             await runner.setup()
             site = web.TCPSite(runner, "0.0.0.0", PORT)
             await site.start()
-            logging.info(f"Webhook server running at {WEBHOOK} on port {PORT}")
-
-            # Set webhook for Telegram
-            await self.set_webhook(WEBHOOK)
+            logging.info(f"Web server running on port {PORT}")
 
         except Exception as e:
             logging.error(f"Failed to start bot: {e}")
@@ -87,4 +82,4 @@ class Bot(Client):
 
 if __name__ == "__main__":
     bot = Bot()
-    bot.run()
+    bot.run()  # ✅ Uses long-polling; no webhooks
