@@ -1,20 +1,16 @@
-# main.py
-
+# bot.py
 import logging
 import sys
 import asyncio
 from pyrogram import Client
 from aiohttp import web
-from config import API_ID, API_HASH, BOT_TOKEN, PORT, MONGO_URI, MONGO_DB_NAME, LOG_CHANNEL
+from config import API_ID, API_HASH, BOT_TOKEN, PORT, MONGO_URI, MONGO_DB_NAME, LOG_CHANNEL, WEBHOOK
 from database.users import Database
 from plugins.web_support import web_server
 from utils import check_idle_chats, safe_reply
-
-# ✅ CORRECT IMPORT: We need the function that STARTS the scheduler
 from plugins.ai import load_ai_state, start_greeting_task
-from utils import load_autodelete_state # Assuming you moved the function here
+from utils import load_autodelete_state
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -22,10 +18,6 @@ logging.basicConfig(
 logging.getLogger("pyrogram").setLevel(logging.WARNING)
 logging.getLogger("aiohttp").setLevel(logging.WARNING)
 
-
-# ------------------------------------
-# 🤖 BOT CLASS
-# ------------------------------------
 class Bot(Client):
     def __init__(self):
         super().__init__(
@@ -34,10 +26,8 @@ class Bot(Client):
             api_hash=API_HASH,
             bot_token=BOT_TOKEN,
             workers=50,
-            plugins={"root": "plugins"},
-            sleep_threshold=5,
         )
-        self.database = Database(MONGO_URI, MONGO_DB_NAME) 
+        self.database = Database(MONGO_URI, MONGO_DB_NAME)
 
     async def start(self):
         try:
@@ -47,35 +37,39 @@ class Bot(Client):
             self.mention = me.mention
             self.username = me.username
 
-            start_message = f"{me.first_name} ✅✅ BOT started successfully ✅✅"
+            start_message = f"{me.first_name} ✅ BOT started successfully ✅"
             logging.info(start_message)
             await self.send_message(LOG_CHANNEL, start_message)
 
-            # Start webserver
-            app_runner = web.AppRunner(await web_server())
-            await app_runner.setup()
-            site = web.TCPSite(app_runner, "0.0.0.0", PORT)
-            await site.start()
-            logging.info(f"Web server started on 0.0.0.0:{PORT}")
-            
-            # --- ✅ STEP 1: Load states from DB before starting tasks ---
-            logging.info("Loading AI and Autodelete states from database...")
+            # Load AI and autodelete states
             await load_ai_state()
-            await load_autodelete_state(self.database) # Pass the db instance
-            
-            # --- ✅ STEP 2: Start the background greeting scheduler task from ai.py ---
-            logging.info("Starting AI greeting scheduler...")
+            await load_autodelete_state(self.database)
+
+            # Start background tasks
             asyncio.create_task(start_greeting_task(self))
-            
-            logging.info("Starting idle chat checker...")
-            asyncio.create_task(check_idle_chats(lambda uid, text="⚠️ Chat closed due to inactivity.": safe_reply(bot.get_users(uid), text)))
-            
+            asyncio.create_task(
+                check_idle_chats(lambda uid, text="⚠️ Chat closed due to inactivity.": safe_reply(self.get_users(uid), text))
+            )
+
+            # Start aiohttp server for webhook
+            web_app = await web_server()
+            # Add Pyrogram webhook handler
+            self.add_webhook(web_app)
+            runner = web.AppRunner(web_app)
+            await runner.setup()
+            site = web.TCPSite(runner, "0.0.0.0", PORT)
+            await site.start()
+            logging.info(f"Webhook server running at {WEBHOOK} on port {PORT}")
+
+            # Set webhook for Telegram
+            await self.set_webhook(WEBHOOK)
+
         except Exception as e:
-            logging.error(f"Failed to start the bot: {e}")
+            logging.error(f"Failed to start bot: {e}")
             try:
-                await self.send_message(LOG_CHANNEL, f"Failed to start the bot: {e}")
-            except Exception as send_error:
-                logging.error(f"Failed to send error message to log channel: {send_error}")
+                await self.send_message(LOG_CHANNEL, f"Failed to start bot: {e}")
+            except:
+                pass
             sys.exit(1)
 
     async def stop(self, *args):
@@ -85,15 +79,12 @@ class Bot(Client):
             logging.info("Bot Stopped 🙄")
             await self.send_message(LOG_CHANNEL, "Bot Stopped 🙄")
         except Exception as e:
-            logging.error(f"Failed to stop the bot: {e}")
+            logging.error(f"Failed to stop bot: {e}")
             try:
-                await self.send_message(LOG_CHANNEL, f"Failed to stop the bot: {e}")
-            except Exception as send_error:
-                logging.error(f"Failed to send stop message to log channel: {send_error}")
+                await self.send_message(LOG_CHANNEL, f"Failed to stop bot: {e}")
+            except:
+                pass
 
-# ------------------------------------
-# 🏃 Run bot
-# ------------------------------------
 if __name__ == "__main__":
     bot = Bot()
     bot.run()
