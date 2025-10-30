@@ -30,7 +30,7 @@ def check_insta_session():
 # --- Commands ---
 @Client.on_message(filters.command("insta_login") & filters.user(ADMIN_IDS))
 async def insta_login(client: Client, message: Message):
-    login_url = f"{WEBHOOK}/insta_login"
+    login_url = f"{WEBHOOK}insta_login"
     await message.reply(f"🌐 Click below to log in to Instagram:\n\n{login_url}")
 
 @Client.on_message(filters.command("insta_post") & filters.user(ADMIN_IDS))
