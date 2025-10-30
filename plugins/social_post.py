@@ -1,4 +1,3 @@
-# plugins/social_post.py
 import os
 import logging
 from pyrogram import Client, filters
@@ -15,6 +14,7 @@ os.makedirs("sessions", exist_ok=True)
 
 
 def check_insta_session():
+    """Check if Instagram session exists and is valid."""
     if not os.path.exists(INSTA_SESSION_FILE):
         return False
     try:
@@ -29,6 +29,12 @@ def check_insta_session():
 
 @Client.on_message(filters.command("insta_login") & filters.user(ADMIN_IDS))
 async def insta_login(client: Client, message: Message):
+    """Send web login link if session not valid, else confirm login."""
+    if check_insta_session():
+        user_info = insta_client.user_info(insta_client.user_id)
+        await message.reply(f"✅ Already logged in as {user_info.username}!")
+        return
+
     base_url = os.getenv("APP_URL", f"https://{client.username}.koyeb.app")
     login_url = f"{base_url}/insta_login"
     await message.reply(f"🌐 Click below to log in to Instagram:\n\n{login_url}")
@@ -36,6 +42,7 @@ async def insta_login(client: Client, message: Message):
 
 @Client.on_message(filters.command("insta_post") & filters.user(ADMIN_IDS))
 async def insta_post(client: Client, message: Message):
+    """Post a Telegram video reply to Instagram Reels."""
     if not check_insta_session():
         await message.reply("⚠️ Not logged in. Please run /insta_login first.")
         return
