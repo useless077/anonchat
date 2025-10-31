@@ -144,7 +144,7 @@ async def insta_post(client: Client, message: Message):
     caption_parts = [part for part in message.command[1:] if not part.startswith("--")]
     cmd_caption = " ".join(caption_parts).strip()
     media_caption = (replied_msg.caption or "").strip()
-    default_caption = "📸 Beautiful moments captured! #aitamilreels" if is_photo_post else "🎬 Watch this amazing video! #aitamilreels"
+    default_caption = "📸 𝐟𝐨𝐥𝐥𝐨𝐰 𝐟𝐨𝐫 𝐦𝐨𝐫𝐞 𝐢𝐧𝐭𝐞𝐫𝐞𝐬𝐭𝐢𝐧𝐠 𝐯𝐢𝐝𝐞𝐨𝐬. 𝐝𝐨𝐧'𝐭 𝐟𝐨𝐫𝐠𝐞𝐭 𝐭𝐨 𝐬𝐡𝐚𝐫𝐞 𝐨𝐮𝐫 𝐩𝐨𝐬𝐭.. #tamilreels #tamilaunty #tamilactresses #hotreels #trendingsong #viral" if is_photo_post else "𝐟𝐨𝐥𝐥𝐨𝐰 𝐟𝐨𝐫 𝐦𝐨𝐫𝐞 𝐢𝐧𝐭𝐞𝐫𝐞𝐬𝐭𝐢𝐧𝐠 𝐩𝐡𝐨𝐭𝐨𝐬 𝐚𝐧𝐝 𝐦𝐞𝐦𝐞𝐬. 𝐝𝐨𝐧'𝐭 𝐟𝐨𝐫𝐠𝐞𝐭 𝐭𝐨 𝐬𝐡𝐚𝐫𝐞 𝐨𝐮𝐫 𝐩𝐨𝐬𝐭.. #tamilmemes #tamilaunty #tamilactresses #trendingsong #viral"
     caption = cmd_caption or media_caption or default_caption
     
     post_type = "Reel" if is_reel else ("Carousel" if len(file_paths) > 1 else ("Photo" if file_paths[0].lower().endswith(('.jpg', '.jpeg', '.png')) else "Video"))
@@ -167,7 +167,7 @@ async def insta_post(client: Client, message: Message):
         if media and hasattr(media, "code"):
             post_url = f"https://www.instagram.com/p/{media.code}/"
             await message.reply(
-                f"✅ Uploaded successfully to Instagram {post_type}!\n\n📝 Caption:\n{caption}\n\n🔗 {post_url}"
+                f"✅ Uploaded successfully to Instagram {post_type}!\n\n📝 Caption:\n{caption}\n\n 𝗳𝗼𝗹𝗹𝗼𝘄 𝗳𝗼𝗿 𝗺𝗼𝗿𝗲 𝗶𝗻𝘁𝗲𝗿𝗲𝘀𝘁𝗶𝗻𝗴 𝘃𝗶𝗱𝗲𝗼𝘀 𝗮𝗻𝗱 𝗽𝗵𝗼𝘁𝗼𝘀😘😍💕🥵🔗 {post_url}"
             )
         else:
             await message.reply(f"✅ Uploaded successfully to Instagram {post_type}! (Link unavailable)")
