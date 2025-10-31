@@ -12,6 +12,8 @@ class Database:
         self.users = self.db["users"]
         self.ai_settings = self.db["ai_settings"]
         self.autodelete_settings = self.db["autodelete_settings"]
+        # --- NEW ---
+        self.insta_sessions = self.db["insta_sessions"]
 
     # ------------------- Connection -------------------
     async def connect(self):
@@ -161,6 +163,23 @@ class Database:
     async def get_all_autodelete_enabled_chats(self) -> Set[int]:
         cursor = self.autodelete_settings.find({"autodelete_enabled": True})
         return {doc["_id"] async for doc in cursor}
+
+    # ------------------- Instagram Session Management (NEW) -------------------
+    async def get_insta_session(self, bot_session_name: str) -> Optional[Dict[str, Any]]:
+        """Retrieve Instagram session settings for a specific bot."""
+        return await self.insta_sessions.find_one({"_id": bot_session_name})
+
+    async def save_insta_session(self, bot_session_name: str, settings: dict):
+        """Save or update Instagram session settings for a specific bot."""
+        await self.insta_sessions.update_one(
+            {"_id": bot_session_name},
+            {"$set": {"settings": settings}},
+            upsert=True
+        )
+
+    async def delete_insta_session(self, bot_session_name: str):
+        """Delete the Instagram session for a specific bot."""
+        await self.insta_sessions.delete_one({"_id": bot_session_name})
 
 
 # ------------------- Shared instance -------------------
