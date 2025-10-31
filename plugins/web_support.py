@@ -1,28 +1,43 @@
 # plugins/web_support.py
-import os
+import logging
 from aiohttp import web
 from instagrapi import Client as InstaClient
-import logging
+
+# --- ✅ NEW IMPORTS ---
+# We need the database instance and the DB name to save the session
+from database.users import db
+from config import MONGO_DB_NAME
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-insta_client = InstaClient()
-INSTA_SESSION_FILE = "sessions/insta_session.json"
-os.makedirs("sessions", exist_ok=True)
+# --- ❌ REMOVED ---
+# We no longer need the local file or the global client
+# INSTA_SESSION_FILE = "sessions/insta_session.json"
+# os.makedirs("sessions", exist_ok=True)
+# insta_client = InstaClient()
 
-def check_insta_session():
-    """Check if Instagram session exists and is valid."""
-    if not os.path.exists(INSTA_SESSION_FILE):
-        return False
-    try:
-        insta_client.load_settings(INSTA_SESSION_FILE)
-        user_info = insta_client.user_info(insta_client.user_id)
-        logger.info(f"✅ Instagram session valid: {user_info.username}")
-        return True
-    except Exception as e:
-        logger.error(f"❌ Invalid Instagram session: {e}")
-        return False
+# --- ✅ NEW FUNCTION ---
+# This function now checks MongoDB instead of a local file
+async def check_insta_session_db():
+    """Check if Instagram session exists in MongoDB and is valid."""
+    logger.info(f"🔍 [Web] Checking for Instagram session in database '{MONGO_DB_NAME}'...")
+    session_doc = await db.get_insta_session(MONGO_DB_NAME)
+    if session_doc and "settings" in session_doc:
+        try:
+            # Create a temporary client to validate the session
+            temp_client = InstaClient()
+            temp_client.set_settings(session_doc["settings"])
+            user_info = temp_client.user_info(temp_client.user_id)
+            logger.info(f"✅ [Web] Instagram session valid: {user_info.username}")
+            return True, user_info.username
+        except Exception as e:
+            logger.error(f"❌ [Web] Invalid Instagram session in DB: {e}")
+            # Clean up the invalid session from DB
+            await db.delete_insta_session(MONGO_DB_NAME)
+            return False, None
+    logger.info("ℹ️ [Web] No session found in MongoDB.")
+    return False, None
 
 routes = web.RouteTableDef()
 
@@ -33,9 +48,12 @@ async def root_route_handler(request):
 @routes.get("/insta_login")
 async def insta_login_page(request):
     """Show login page if session not active."""
-    if check_insta_session():
+    # --- ✅ UPDATED ---
+    # Use the new async function to check the database
+    is_logged_in, username = await check_insta_session_db()
+    if is_logged_in:
         return web.Response(
-            text=f"✅ Already logged in as {insta_client.user_info(insta_client.user_id).username}! You can close this tab.",
+            text=f"✅ Already logged in as {username}! You can close this tab.",
             content_type="text/html"
         )
 
@@ -60,14 +78,22 @@ async def insta_auth(request):
     username = data.get("username")
     password = data.get("password")
     try:
-        insta_client.login(username, password)
-        insta_client.dump_settings(INSTA_SESSION_FILE)
+        # --- ✅ THE CORE CHANGE ---
+        # We use a temporary client just for this login process
+        temp_insta_client = InstaClient()
+        temp_insta_client.login(username, password)
+        
+        # After successful login, get the settings and save them to MongoDB
+        settings = temp_insta_client.get_settings()
+        await db.save_insta_session(MONGO_DB_NAME, settings)
+        logger.info(f"💾 [Web] Instagram session for '{username}' saved to MongoDB.")
+        
         return web.Response(
-            text="✅ Instagram login successful! You can close this tab.",
+            text="✅ Instagram login successful! Session saved. You can close this tab.",
             content_type="text/html"
         )
     except Exception as e:
-        logger.error(f"Login failed: {e}")
+        logger.error(f"[Web] Login failed: {e}")
         return web.Response(text=f"❌ Login failed: {e}", content_type="text/html")
 
 async def web_server():
