@@ -52,11 +52,10 @@ ADMIN_IDS = list(map(int, get_env_variable('ADMIN_IDS', '7066475210,1286157597')
 ENABLE_PREF_MATCH = get_env_variable('ENABLE_PREF_MATCH', 'false').lower() == "true"
 
 # In config.py
-INSTA_PROXIES = [
-    "http://user:pass@proxy1.example.com:8080",
-    "http://user:pass@proxy2.example.com:8080",
-    # Add more proxies here
-]
+# In config.py
+
+# Leave this empty. The bot will find free proxies automatically for you.
+INSTA_PROXIES = [] 
 # Deployment
 PORT = int(get_env_variable('PORT', '8000'))
 if PORT <= 0:
