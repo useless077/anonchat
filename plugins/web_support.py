@@ -1,34 +1,40 @@
 # plugins/web_support.py
 import logging
+import random  # <--- Added import
 from aiohttp import web
 from instagrapi import Client as InstaClient
 
-# --- ✅ NEW IMPORTS ---
-# We need the database instance and the DB name to save the session
+# --- IMPORT YOUR SHARED DB INSTANCE ---
 from database.users import db
-from config import MONGO_DB_NAME
+from config import MONGO_DB_NAME, INSTA_PROXIES  # <--- Import proxies
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- ❌ REMOVED ---
-# We no longer need the local file or the global client
-# INSTA_SESSION_FILE = "sessions/insta_session.json"
-# os.makedirs("sessions", exist_ok=True)
-# insta_client = InstaClient()
+def get_random_proxy():
+    """Helper to pick a random proxy."""
+    if INSTA_PROXIES:
+        return random.choice(INSTA_PROXIES)
+    return None
 
 # --- ✅ NEW FUNCTION ---
-# This function now checks MongoDB instead of a local file
 async def check_insta_session_db():
-    """Check if Instagram session exists in MongoDB and is valid."""
+    """Check if Instagram session exists in MongoDB and is valid using a PROXY."""
     logger.info(f"🔍 [Web] Checking for Instagram session in database '{MONGO_DB_NAME}'...")
     session_doc = await db.get_insta_session(MONGO_DB_NAME)
+    
     if session_doc and "settings" in session_doc:
+        proxy = get_random_proxy()
+        logger.info(f"🌐 [Web] Using proxy: {proxy}")
+        
         try:
-            # Create a temporary client to validate the session
-            temp_client = InstaClient()
+            # Create a temporary client WITH PROXY to validate the session
+            temp_client = InstaClient(proxy=proxy)
             temp_client.set_settings(session_doc["settings"])
+            
+            # This checks if the session is still valid (it makes a request to IG)
             user_info = temp_client.user_info(temp_client.user_id)
+            
             logger.info(f"✅ [Web] Instagram session valid: {user_info.username}")
             return True, user_info.username
         except Exception as e:
@@ -36,6 +42,7 @@ async def check_insta_session_db():
             # Clean up the invalid session from DB
             await db.delete_insta_session(MONGO_DB_NAME)
             return False, None
+            
     logger.info("ℹ️ [Web] No session found in MongoDB.")
     return False, None
 
@@ -51,6 +58,7 @@ async def insta_login_page(request):
     # --- ✅ UPDATED ---
     # Use the new async function to check the database
     is_logged_in, username = await check_insta_session_db()
+    
     if is_logged_in:
         return web.Response(
             text=f"✅ Already logged in as {username}! You can close this tab.",
@@ -77,15 +85,22 @@ async def insta_auth(request):
     data = await request.post()
     username = data.get("username")
     password = data.get("password")
+    
+    proxy = get_random_proxy()
+    logger.info(f"🌐 [Web] Attempting login via proxy: {proxy}")
+
     try:
         # --- ✅ THE CORE CHANGE ---
-        # We use a temporary client just for this login process
-        temp_insta_client = InstaClient()
+        # Create a temporary client WITH PROXY for this login process
+        temp_insta_client = InstaClient(proxy=proxy)
+        
+        # Attempt login
         temp_insta_client.login(username, password)
         
         # After successful login, get the settings and save them to MongoDB
         settings = temp_insta_client.get_settings()
         await db.save_insta_session(MONGO_DB_NAME, settings)
+        
         logger.info(f"💾 [Web] Instagram session for '{username}' saved to MongoDB.")
         
         return web.Response(
