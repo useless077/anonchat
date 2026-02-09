@@ -212,3 +212,76 @@ async def insta_post(client: Client, message: Message):
         for path in file_paths:
             if os.path.exists(path):
                 os.remove(path)
+
+# --- NEW COMMAND: Import Session from Chrome ---
+@Client.on_message(filters.command("import_session") & filters.user(ADMIN_IDS))
+async def import_session_cmd(client: Client, message: Message):
+    """Import a valid sessionid from Chrome to bypass IP blocks."""
+    
+    # 1. Get the sessionid from the command
+    # Example: /import_session 3984759283745928374:1A2B3C...
+    if len(message.command) < 2:
+        await message.reply(
+            "❌ **Usage:** `/import_session <your_sessionid>`\n\n"
+            "👉 **How to get Session ID:**\n"
+            "1. Login to Instagram on Chrome.\n"
+            "2. Press F12 -> Application -> Cookies -> Instagram.\n"
+            "3. Copy the value of `sessionid`.\n"
+            "4. Paste it here."
+        )
+        return
+
+    session_id = message.command[1]
+    await message.reply("⏳ Verifying session...")
+
+    try:
+        # 2. Create a temporary client and inject the cookie
+        temp_client = InstaClient()
+        
+        # Construct the settings dictionary with just the sessionid
+        # We set 'uuid' to a random one to prevent device mismatch errors
+        import uuid
+        device_id = str(uuid.uuid4())
+        
+        settings = {
+            "cookies": [
+                {
+                    "name": "sessionid",
+                    "value": session_id,
+                    "domain": ".instagram.com",
+                    "path": "/",
+                    "expires": None,
+                    "secure": True,
+                    "httponly": False,
+                    "SameSite": "Lax"
+                }
+            ],
+            "device_settings": {
+                "uuid": device_id,
+                "manufacturer": "Xiaomi",
+                "model": "Mi 9T",
+                "android_version": 28,
+                "android_release": "9.0"
+            },
+            "user_agent": "Instagram 219.0.0.12.117 Android"
+        }
+        
+        temp_client.set_settings(settings)
+        
+        # 3. Verify the session by fetching user info
+        user_info = temp_client.user_info_from_username("instagram") # Check official account to verify
+        
+        # 4. If successful, save to DB
+        await db.save_insta_session(MONGO_DB_NAME, settings)
+        
+        await message.reply(
+            f"✅ **Session Imported Successfully!**\n\n"
+            f"Logged in as user: **{temp_client.user_id}**\n"
+            f"You can now use `/insta_post` commands."
+        )
+        logger.info(f"✅ [SessionImport] User imported session via Chrome.")
+
+    except Exception as e:
+        logger.error(f"❌ [SessionImport] Failed: {e}")
+        await message.reply(f"❌ **Invalid Session ID.**\n\nMake sure you copied the `sessionid` correctly from Chrome. \n\nError: {e}")
+
