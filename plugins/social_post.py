@@ -3,6 +3,7 @@ import os
 import asyncio
 import logging
 import secrets
+import random
 from typing import List, Optional
 
 from pyrogram import Client, filters
@@ -14,7 +15,7 @@ from instagrapi.exceptions import LoginRequired, ChallengeRequired, PrivateError
 from database.users import db
 
 # --- IMPORT CONFIG VALUES ---
-from config import ADMIN_IDS, WEBHOOK, MONGO_DB_NAME
+from config import ADMIN_IDS, WEBHOOK, MONGO_DB_NAME, INSTA_PROXIES
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,24 +23,47 @@ logger = logging.getLogger(__name__)
 # --- Instagram client setup ---
 insta_client = InstaClient()
 
+# After imports, before the client setup
+def get_random_proxy():
+    """Helper to pick a random proxy."""
+    if INSTA_PROXIES:
+        return random.choice(INSTA_PROXIES)
+    return None
+
 # --- Session Management (using your Database class) ---
 async def load_insta_session() -> bool:
     """Load Instagram session settings from MongoDB using the shared db instance."""
     logger.info(f"🔍 Checking for Instagram session in database '{MONGO_DB_NAME}'...")
-    # Using MONGO_DB_NAME as the unique session identifier
     session_doc = await db.get_insta_session(MONGO_DB_NAME)
+    
     if session_doc and "settings" in session_doc:
         try:
+            # --- CHANGE STARTS HERE ---
+            # 1. Pick a random proxy
+            proxy = get_random_proxy()
+            logger.info(f"🌐 [SocialPost] Using proxy: {proxy}")
+
+            # 2. Use 'global' to modify the client used by the upload function
+            global insta_client 
+            
+            # 3. Initialize client with the proxy
+            insta_client = InstaClient(proxy=proxy)
+            # --- CHANGE ENDS HERE ---
+
             insta_client.set_settings(session_doc["settings"])
+            
             # Check if the loaded session is valid by trying to get user info
+            # (This request now goes through the proxy)
             user_info = await asyncio.to_thread(insta_client.user_info, insta_client.user_id)
             logger.info(f"✅ Logged in as {user_info.username} from MongoDB session.")
             return True
+            
         except Exception as e:
             logger.error(f"❌ Invalid or expired session in DB: {e}")
             # Clean up the invalid session from DB
             await db.delete_insta_session(MONGO_DB_NAME)
             return False
+            
     logger.info("ℹ️ No session found in MongoDB.")
     return False
 
