@@ -30,7 +30,7 @@ async def forward_worker(client):
     
     # Get Bot Username
     me = await client.get_me()
-    bot_username = me.username if me.username else "venumabot"
+    bot_username = me.username if me.username else "TamilAnonymousChatBot"
     start_link = f"https://t.me/{bot_username}?start=start"
 
     while True:
