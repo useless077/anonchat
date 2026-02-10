@@ -23,6 +23,10 @@ def get_env_variable(var_name, default=None):
 
 # Telegram Bot
 BOT_TOKEN = get_env_variable('BOT_TOKEN')
+# --- ADDED THIS LINE FOR THE BUTTON ---
+BOT_USERNAME = get_env_variable('BOT_USERNAME', 'YourActualBotUsername') 
+# -------------------------------------
+
 API_ID = int(get_env_variable('API_ID', '1779071'))
 if API_ID <= 0:
     logging.error("API_ID must be a positive integer")
@@ -48,11 +52,10 @@ if LOG_USERS == 0:
     logging.error("LOG_USERS is not set")
     raise ValueError("LOG_USERS is not set")
 ADMIN_IDS = list(map(int, get_env_variable('ADMIN_IDS', '7066475210,1286157597').split(",")))
+
 # Matching feature
 ENABLE_PREF_MATCH = get_env_variable('ENABLE_PREF_MATCH', 'false').lower() == "true"
 
-# In config.py
-# In config.py
 # --- Auto Forwarder Config ---
 # The Channel ID to take videos/photos from
 FORWARDER_SOURCE_ID = int(get_env_variable('FORWARDER_SOURCE_ID', '-1002671041761'))
@@ -66,6 +69,7 @@ AUTO_DELETE_DELAY = 5 * 60 # 5 minutes after posting
 
 # Leave this empty. The bot will find free proxies automatically for you.
 INSTA_PROXIES = [] 
+
 # Deployment
 PORT = int(get_env_variable('PORT', '8000'))
 if PORT <= 0:
