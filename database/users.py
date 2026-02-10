@@ -14,6 +14,7 @@ class Database:
         self.autodelete_settings = self.db["autodelete_settings"]
         # --- NEW ---
         self.insta_sessions = self.db["insta_sessions"]
+        self.forwarder_checkpoint = self.db["forwarder_checkpoints"]
 
     # ------------------- Connection -------------------
     async def connect(self):
