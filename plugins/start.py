@@ -5,32 +5,42 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 import config
 from database.users import db
-from plugins.partner import search_command
+
+# Import necessary components from partner to handle the flow
+from plugins.partner import (
+    search_command, 
+    profile_states, 
+    profile_data, 
+    start_profile_timer
+)
 from plugins.ai import ai_enabled_groups
 
-# ----------------- Commands -----------------
+# ----------------- Group Start Command -----------------
 
 @Client.on_message(filters.group & filters.command("start"))
 async def group_start_cmd(client, message):
-    """Handle /start command in groups"""
+    """Handle /start command in groups using config username for speed."""
     buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🤖 Start in PM", url=f"https://t.me/{(await client.get_me()).username}")]
+        [InlineKeyboardButton("🤖 Start in PM", url=f"https://t.me/{config.BOT_USERNAME}?start=WelcomeMessage")]
     ])
     await message.reply_text(
         "ʏᴏᴜ ᴄᴀɴɴᴏᴛ ꜱᴛᴀʀᴛ ᴍᴇ ɪɴ ᴀ ɢʀᴏᴜᴘ. ᴄʟɪᴄᴋ ʙᴇʟᴏᴡ ᴛᴏ ᴜꜱᴇ ᴍᴇ ɪɴ ᴘʀɪᴠᴀᴛᴇ ᴄʜᴀᴛ.",
         reply_markup=buttons
     )
 
+# ----------------- Private Start Command -----------------
+
 @Client.on_message(filters.private & filters.command("start"))
 async def start_cmd(client, message):
-    """UNIFIED START COMMAND for private chats."""
+    """UNIFIED START COMMAND with Profile Check."""
     user_id = message.from_user.id
     first_name = message.from_user.first_name or "Unknown"
-
-    # Check user in DB
+    
+    # 1. Check if user exists in DB, if not, add and log
     user = await db.get_user(user_id)
+    is_new_user = False
 
-    if not user:  # First time user
+    if not user:  
         await db.add_user(user_id, {
             "name": "",
             "gender": "",
@@ -38,8 +48,10 @@ async def start_cmd(client, message):
             "location": "",
             "dp": None
         }, user_type="user")
+        is_new_user = True
+        user = await db.get_user(user_id) # Refresh user object
 
-        # Log to channel
+        # Log new user to channel
         try:
             username = f"@{message.from_user.username}" if message.from_user.username else "No Username"
             log_text = (
@@ -48,7 +60,6 @@ async def start_cmd(client, message):
                 f"🆔 **User ID:** `{user_id}`\n"
                 f"📝 **Username:** {username}"
             )
-        
             await client.send_message(
                 config.LOG_CHANNEL,
                 log_text,
@@ -57,62 +68,139 @@ async def start_cmd(client, message):
         except Exception as e:
             print(f"[LOG ERROR] Could not send to log channel: {e}")
 
-    # Get Bot Username dynamically for the "Add to Group" link
-    me = await client.get_me()
-    bot_username = me.username if me.username else "venumabot"
+    # 2. Check if user has a complete profile
+    profile = user.get("profile", {})
+    has_profile = bool(profile and profile.get("name"))
 
-    welcome_text = (
-        "👋 **ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ ᴏᴜʀ ᴘᴏᴡᴇʀꜰᴜʟ ᴄʜᴀᴛ ʙᴏᴛ!**\n\n"
-        "ɪ ᴀᴍ ᴍᴏʀᴇ ᴛʜᴀɴ ᴊᴜꜱᴛ ᴀɴ ᴀɴᴏɴʏᴍᴏᴜꜱ ᴄʜᴀᴛ ʙᴏᴛ. ɪ ᴀᴍ ᴀ ᴘᴏᴡᴇʀꜰᴜʟ ᴀɪ ᴄʜᴀᴛ ʙᴏᴛ ᴛᴏᴏ!\n\n"
-        "🔍 **ᴀɴᴏɴʏᴍᴏᴜꜱ ᴄʜᴀᴛ ꜰᴇᴀᴛᴜʀᴇꜱ:**\n"
-        "• /profile - ᴄʀᴇᴀᴛᴇ ᴏʀ ᴜᴘᴅᴀᴛᴇ ʏᴏᴜʀ ᴘʀᴏꜰɪʟᴇ\n"
-        "• /search - ꜰɪɴᴅ ᴀ ʀᴀɴᴅᴏᴍ ᴘᴀʀᴛɴᴇʀ ᴛᴏ ᴄʜᴀᴛ ᴡɪᴛʜ\n"
-        "• /cancel - ᴄᴀɴᴄᴇʟ ʏᴏᴜʀ ᴘᴀʀᴛɴᴇʀ ꜱᴇᴀʀᴄʜ\n"
-        "• /myprofile - ᴠɪᴇᴡ ʏᴏᴜʀ ᴄᴜʀʀᴇɴᴛ ᴘʀᴏꜰɪʟᴇ\n"
-        "• /next - ꜱᴋɪᴘ ᴛᴏ ᴛʜᴇ ɴᴇxᴛ ᴘᴀʀᴛɴᴇʀ\n"
-        "• /end - ᴇɴᴅ ᴛʜᴇ ᴄᴜʀʀᴇɴᴛ ᴄʜᴀᴛ\n\n"
-        "🤖 **ᴀɪ ɢʀᴏᴜᴘ ꜰᴇᴀᴛᴜʀᴇꜱ:**\n"
-        "• ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘ\n"
-        "• ᴜꜱᴇ '/ai on` ᴛᴏ ᴀᴄᴛɪᴠᴀᴛᴇ ᴍᴇ (ᴀᴅᴍɪɴꜱ ᴏɴʟʏ)\n"
-        "• ɪ ᴡɪʟʟ ᴄʜᴀᴛ ɴᴀᴛᴜʀᴀʟʟʏ ɪɴ ʏᴏᴜʀ ɢʀᴏᴜᴘ!"
-    )
+    # 3. Handle Start Arguments (e.g., from group button)
+    if len(message.command) > 1:
+        arg = message.command[1]
+        if arg == "WelcomeMessage":
+            welcome_extra = "ᴛʜᴀɴᴋꜱ ꜰᴏʀ ꜱᴛᴀʀᴛɪɴɢ ʜᴇʀᴇ!\n"
+        else:
+            welcome_extra = ""
+    else:
+        welcome_extra = ""
 
-    # --- UPDATED BUTTONS LAYOUT ---
-    buttons = InlineKeyboardMarkup([
-        # Row 1: Main Channel and XTamil Chat
-        [
-            InlineKeyboardButton("Main Channel", url="https://t.me/venuma"),
-            InlineKeyboardButton("XTamil Chat", url="https://t.me/xtamilchat")
-        ],
-        # Row 2: Add to Group
-        [
-            InlineKeyboardButton("➕ Add to Your Group", url=f"https://t.me/{bot_username}?startgroup=true")
-        ],
-        # Row 3: Find Your Partner
-        [
-            InlineKeyboardButton("🔍 Find Your Partner", callback_data="search")
-        ]
-    ])
+    # 4. Build Response based on Profile Status
+    if not has_profile:
+        # --- USER NEEDS PROFILE ---
+        text = (
+            f"👋 **ʜᴇʟʟᴏ {first_name}!**\n\n"
+            f"{welcome_extra}"
+            "ᴛᴏ ꜱᴛᴀʀᴛ ᴜꜱɪɴɢ ᴛʜᴇ ʙᴏᴛ, ʏᴏᴜ ɴᴇᴇᴅ ᴛᴏ ꜱᴇᴛᴜᴘ ʏᴏᴜʀ ᴘʀᴏꜰɪʟᴇ ꜰɪʀꜱᴛ.\n"
+            "ᴛʜɪꜱ ʜᴇʟᴘꜱ ᴜꜱ ꜰɪɴᴅ ʏᴏᴜ ᴀ ᴍᴀᴛᴄʜ ʙᴀꜱᴇᴅ ᴏɴ ʏᴏᴜʀ ᴅᴇᴛᴀɪʟꜱ."
+        )
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✏️ ᴄʀᴇᴀᴛᴇ ᴘʀᴏꜰɪʟᴇ", callback_data="create_profile_flow")]
+        ])
+        await message.reply_photo(
+            photo="https://graph.org/file/c3be33fb5c2a81a835292-2c39b4021db14d2a69.jpg",
+            caption=text,
+            reply_markup=buttons,
+            parse_mode=enums.ParseMode.HTML
+        )
+    
+    else:
+        # --- USER HAS PROFILE (Show Menu) ---
+        name = profile.get('name', 'User')
+        
+        text = (
+            f"ʜᴇʏ **{name}**! 🧚‍♀\n\n"
+            f"{welcome_extra}"
+            "ɪ ᴀᴍ ᴀ ᴘᴏᴡᴇʀꜰᴜʟ ᴀɪ ᴀɴᴅ ᴀɴᴏɴʏᴍᴏᴜꜱ ᴄʜᴀᴛ ʙᴏᴛ. "
+            "ᴡʜᴀᴛ ᴡᴏᴜʟᴅ ʏᴏᴜ ʟɪᴋᴇ ᴛᴏ ᴅᴏ ᴛᴏᴅᴀʏ?"
+        )
+        
+        buttons = InlineKeyboardMarkup([
+            # Row 1: Main Actions
+            [
+                InlineKeyboardButton("🔍 ꜱᴇᴀʀᴄʜ ᴘᴀʀᴛɴᴇʀ", callback_data="menu_search"),
+                InlineKeyboardButton("👤 ᴍʏ ᴘʀᴏꜰɪʟᴇ", callback_data="menu_profile")
+            ],
+            # Row 2: External Links
+            [
+                InlineKeyboardButton("Main Channel", url="https://t.me/venuma"),
+                InlineKeyboardButton("XTamil Chat", url="https://t.me/xtamilchat")
+            ],
+            # Row 3: Add to Group & Help
+            [
+                InlineKeyboardButton("➕ ᴀᴅᴅ ᴛᴏ ɢʀᴏᴜᴘ", url=f"https://t.me/{config.BOT_USERNAME}?startgroup=true"),
+                InlineKeyboardButton("📜 ʜᴇʟᴘ", callback_data="menu_help")
+            ]
+        ])
+        
+        await message.reply_photo(
+            photo="https://graph.org/file/c3be33fb5c2a81a835292-2c39b4021db14d2a69.jpg",
+            caption=text,
+            reply_markup=buttons,
+            parse_mode=enums.ParseMode.HTML
+        )
 
-    await message.reply_photo(
-        photo="https://graph.org/file/c3be33fb5c2a81a835292-2c39b4021db14d2a69.jpg",
-        caption=welcome_text,
-        reply_markup=buttons,
-        parse_mode=enums.ParseMode.HTML
-    )
 
 # ----------------- Callback Handlers -----------------
-@Client.on_callback_query(filters.regex("^search$"))
-async def search_cb(client, query):
-    await query.answer()
-    # Call search_command directly. This will start the search process.
-    await search_command(client, query.message)
+
+@Client.on_callback_query(filters.regex("^create_profile_flow$"))
+async def create_profile_cb(client, query):
+    """Handles the 'Create Profile' button click."""
+    user_id = query.from_user.id
+    await query.message.delete()
+    
+    # Initialize the profile state manually
+    profile_states[user_id] = "name"
+    profile_data[user_id] = {}
+
+    async def send_timeout(msg):
+        await client.send_message(user_id, msg)
+
+    await start_profile_timer(user_id, send_timeout)
+    await client.send_message(user_id, "✏️ **sᴇɴᴅ ʏᴏᴜʀ ꜰᴜʟʟ ɴᴀᴍᴇ:**")
+
+
+@Client.on_callback_query(filters.regex("^menu_search$"))
+async def menu_search_cb(client, query):
+    """Handles the 'Search' button click."""
+    await query.message.delete()
+    # Trigger search by simulating a /search command
+    await client.send_message(query.from_user.id, "/search")
+
+
+@Client.on_callback_query(filters.regex("^menu_profile$"))
+async def menu_profile_cb(client, query):
+    """Handles the 'My Profile' button click."""
+    await query.message.delete()
+    await client.send_message(query.from_user.id, "/myprofile")
+
+
+@Client.on_callback_query(filters.regex("^menu_help$"))
+async def menu_help_cb(client, query):
+    """Handles the 'Help' button click."""
+    help_text = (
+        "📜 **ʜᴇʟᴘ & ʀᴜʟᴇꜱ**\n\n"
+        "🔍 **ᴀɴᴏɴʏᴍᴏᴜꜱ ᴄʜᴀᴛ:**\n"
+        "• /search - ꜰɪɴᴅ ᴀ ᴘᴀʀᴛɴᴇʀ\n"
+        "• /next - ꜱᴋɪᴘ ᴄᴜʀʀᴇɴᴛ ᴘᴀʀᴛɴᴇʀ\n"
+        "• /end - ᴅɪꜱᴄᴏɴɴᴇᴄᴛ ᴄʜᴀᴛ\n"
+        "• /profile - ᴇᴅɪᴛ ʏᴏᴜʀ ᴅᴇᴛᴀɪʟꜱ\n\n"
+        "🤖 **ɢʀᴏᴜᴘ ᴀɪ:**\n"
+        "• /ai on - ᴇɴᴀʙʟᴇ ᴀɪ (ᴀᴅᴍɪɴ)\n"
+        "• /ai off - ᴅɪꜱᴀʙʟᴇ ᴀɪ (ᴀᴅᴍɪɴ)\n\n"
+        "📝 **ʀᴜʟᴇꜱ:**\n"
+        "1. ʙᴇ ʀᴇꜱᴘᴇᴄᴛꜰᴜʟ ᴛᴏ ᴏᴛʜᴇʀꜱ.\n"
+        "2. ɴᴏ ꜱᴘᴀᴍᴍɪɴɢ ᴏʀ ɪʟʟᴇɢᴀʟ ᴄᴏɴᴛᴇɴᴛ."
+    )
+    
+    # Added a Bot Status button in help menu
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 ʙᴏᴛ ꜱᴛᴀᴛᴜꜱ", callback_data="bot_status")],
+        [InlineKeyboardButton("🔙 ʙᴀᴄᴋ", callback_data="back_to_start")]
+    ])
+    await query.message.edit_text(help_text, reply_markup=buttons)
 
 @Client.on_callback_query(filters.regex("^bot_status$"))
 async def bot_status_cb(client, query):
     """Handles the 'Bot Status' button click."""
     await query.answer()
-    
     try:
         total_users = await db.get_total_users()
         active_chats = await db.get_active_chats()
@@ -125,17 +213,28 @@ async def bot_status_cb(client, query):
             f"💬 **ᴀᴄᴛɪᴠᴇ ᴄʜᴀᴛꜱ:** `{active_chats}`\n"
             f"🤖 **ᴀɪ ᴇɴᴀʙʟᴇᴅ ɢʀᴏᴜᴘꜱ:** `{ai_groups}`\n"
             f"🌐 **ᴛᴏᴛᴀʟ ɢʀᴏᴜᴘꜱ:** `{total_groups}`\n\n"
-            f"⚡ **ʙᴏᴛ ꜱᴛᴀᴛᴜꜱ:** `ᴏɴʟɪɴᴇ ᴀɴᴅ ᴡᴏʀᴋɪɴɢ`"
+            f"⚡ **ʙᴏᴛ ꜱᴛᴀᴛᴜꜱ:** `ᴏɴʟɪɴᴇ`"
         )
         
-        await query.message.reply_text(status_text, parse_mode=enums.ParseMode.MARKDOWN)
+        # Reuse the Back button
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 ʙᴀᴄᴋ", callback_data="menu_help")]
+        ])
+        await query.message.edit_text(status_text, reply_markup=buttons, parse_mode=enums.ParseMode.MARKDOWN)
 
     except Exception as e:
         print(f"[BOT_STATUS_CB] Error fetching status: {e}")
-        await query.message.reply_text("ꜱᴏʀʀʏ, ᴄᴏᴜʟᴅɴ'ᴛ ꜰᴇᴛᴄʜ ᴛʜᴇ ʙᴏᴛ ꜱᴛᴀᴛᴜꜱ ʀɪɢʜᴛ ɴᴏᴡ.")
+        await query.message.reply_text("ꜱᴏʀʀʏ, ᴄᴏᴜʟᴅɴ'ᴛ ꜰᴇᴛᴄʜ ꜱᴛᴀᴛᴜꜱ ʀɪɢʜᴛ ɴᴏᴡ.")
+
+@Client.on_callback_query(filters.regex("^back_to_start$"))
+async def back_to_start_cb(client, query):
+    """Handles the 'Back' button."""
+    await query.message.delete()
+    await client.send_message(query.from_user.id, "/start")
 
 
 # ----------------- Group Added Handler -----------------
+
 @Client.on_message(filters.group & filters.new_chat_members)
 async def new_group(client, message):
     """Handle when bot is added to a new group"""
