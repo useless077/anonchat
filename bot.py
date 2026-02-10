@@ -10,9 +10,10 @@ from database.users import Database
 from plugins.web_support import web_server
 from utils import check_idle_chats, safe_reply
 
-# ✅ CORRECT IMPORT: We need the function that STARTS the scheduler
+# ✅ IMPORTS FOR AUTO FORWARDER
 from plugins.ai import load_ai_state, start_greeting_task
-from utils import load_autodelete_state # Assuming you moved the function here
+from plugins.auto_forwarder import catch_up_history, forward_worker # <--- NEW IMPORT
+from utils import load_autodelete_state 
 
 # Configure logging
 logging.basicConfig(
@@ -58,17 +59,28 @@ class Bot(Client):
             await site.start()
             logging.info(f"Web server started on 0.0.0.0:{PORT}")
             
-            # --- ✅ STEP 1: Load states from DB before starting tasks ---
+            # --- Load states ---
             logging.info("Loading AI and Autodelete states from database...")
             await load_ai_state()
-            await load_autodelete_state(self.database) # Pass the db instance
+            await load_autodelete_state(self.database) 
             
-            # --- ✅ STEP 2: Start the background greeting scheduler task from ai.py ---
+            # --- Start AI Greeting ---
             logging.info("Starting AI greeting scheduler...")
             asyncio.create_task(start_greeting_task(self))
             
+            # --- Start Idle Chat Checker ---
             logging.info("Starting idle chat checker...")
             asyncio.create_task(check_idle_chats(lambda uid, text="⚠️ Chat closed due to inactivity.": safe_reply(bot.get_users(uid), text)))
+            
+            # --- ✅ NEW: Start Auto Forwarder ---
+            # 1. First, check history and fill queue with old videos
+            logging.info("Starting Auto Forwarder History Check...")
+            asyncio.create_task(catch_up_history(self))
+
+            # 2. Then, start the worker that posts videos every 15 mins
+            logging.info("Starting Auto Forwarder Worker...")
+            asyncio.create_task(forward_worker(self))
+            # ------------------------------------
             
         except Exception as e:
             logging.error(f"Failed to start the bot: {e}")
