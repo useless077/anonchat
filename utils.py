@@ -74,32 +74,53 @@ async def check_idle_chats(send_message):
             remove_user(u)
         await asyncio.sleep(60)
 
-# ----------------- Search Functions -----------------
-async def send_search_progress(client, user_id: int):
-    """Send periodic updates about search progress."""
-    elapsed = 0
+# ----------------- Search Functions (UPDATED) -----------------
+async def send_search_progress(client, user_id: int, message_obj: Message):
+    """
+    Updates the search message with a countdown timer instead of sending new messages.
+    """
+    start_time = datetime.utcnow()
+    dots_count = 0
     
-    while user_id in waiting_users and elapsed < SEARCH_TIMEOUT:
-        await asyncio.sleep(30)  # Update every 30 seconds
-        elapsed += 30
-        
-        if user_id in waiting_users:
+    try:
+        # Keep running while user is in waiting list
+        while user_id in waiting_users:
+            # Calculate elapsed time
+            elapsed = int((datetime.utcnow() - start_time).total_seconds())
+            
+            # Check if we exceeded timeout (safety break)
+            if elapsed >= SEARCH_TIMEOUT:
+                break
+            
             remaining = SEARCH_TIMEOUT - elapsed
             minutes = remaining // 60
             seconds = remaining % 60
             
+            # Animate dots (1, 2, 3)
+            dots_count = (dots_count % 3) + 1 
+            
+            text = (
+                f"🔍 **sᴇᴀʀᴄʜɪɴɢ ꜰᴏʀ ᴀ ᴘᴀʀᴛɴᴇʀ{'.' * dots_count}**\n"
+                f"⏱️ **ᴛɪᴍᴇ ʀᴇᴍᴀɪɴɪɴɢ:** {minutes:02d}:{seconds:02d}\n"
+                f"⚠️ **ᴜꜱᴇ /ᴄᴀɴᴄᴇʟ ᴛᴏ ꜱᴛᴏᴘ ꜱᴇᴀʀᴄʜɪɴɢ.**"
+            )
+            
             try:
-                await client.send_message(
-                    user_id,
-                    f"⏳ **ꜱᴛɪʟʟ ꜱᴇᴀʀᴄʜɪɴɢ...**\n"
-                    f"ᴛɪᴍᴇ ʀᴇᴍᴀɪɴɪɴɢ: {minutes:02d}:{seconds:02d}\n"
-                    f"ᴜꜱᴇ /ᴄᴀɴᴄᴇʟ ᴛᴏ ꜱᴛᴏᴘ ꜱᴇᴀʀᴄʜɪɴɢ."
-                )
-            except Exception as e:
-                print(f"[SEARCH] Error sending progress update to {user_id}: {e}")
+                # CHANGED: Edit the message instead of sending a new one
+                await message_obj.edit_text(text)
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+            except Exception:
+                # If edit fails (e.g. message deleted by user), stop loop
                 break
-                
-async def check_partner_wait(client, user_id: int, wait_time: int = SEARCH_TIMEOUT):
+            
+            await asyncio.sleep(1) # Update every 1 second for accurate timer
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        print(f"[SEARCH_PROGRESS] Error: {e}")
+
+async def check_partner_wait(client, user_id: int, message_obj=None, wait_time: int = SEARCH_TIMEOUT):
     try:
         print(f"[DEBUG] check_partner_wait STARTED for {user_id} ({wait_time}s)")
         await asyncio.sleep(wait_time)
@@ -108,10 +129,22 @@ async def check_partner_wait(client, user_id: int, wait_time: int = SEARCH_TIMEO
         if user_id in waiting_users:
             print(f"[DEBUG] {user_id} still in waiting_users after timeout, sending message...")
             waiting_users.discard(user_id)
-            await client.send_message(
-                user_id,
-                "😔 **No partner found yet.**\nPlease try again later."
-            )
+            
+            # CHANGED: Edit message if provided, otherwise send new
+            if message_obj:
+                try:
+                    await message_obj.edit_text(
+                        "⏰ **ᴛɪᴍᴇᴏᴜᴛ.**\n\n"
+                        "❌ **ɴᴏ ᴘᴀʀᴛɴᴇʀ ꜰᴏᴜɴᴅ. ᴛʀʏ ᴀɢᴀɪɴ ʟᴀᴛᴇʀ.**"
+                    )
+                except Exception as e:
+                    print(f"[DEBUG] Error editing timeout message: {e}")
+            else:
+                # Fallback if message_obj wasn't passed (backward compatibility)
+                await client.send_message(
+                    user_id,
+                    "😔 **No partner found yet.**\nPlease try again later."
+                )
             print(f"[DEBUG] Timeout message sent to {user_id}")
         else:
             print(f"[DEBUG] {user_id} NOT in waiting_users after timeout (maybe matched/cancelled)")
@@ -119,7 +152,6 @@ async def check_partner_wait(client, user_id: int, wait_time: int = SEARCH_TIMEO
         print(f"[DEBUG] check_partner_wait CANCELLED for {user_id}")
     except Exception as e:
         print(f"[DEBUG] ERROR in check_partner_wait for {user_id}: {e}")
-
 
 async def cancel_search(user_id: int):
     """Cancel search for a user (could be used by multiple modules)"""
