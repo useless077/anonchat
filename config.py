@@ -53,6 +53,16 @@ ENABLE_PREF_MATCH = get_env_variable('ENABLE_PREF_MATCH', 'false').lower() == "t
 
 # In config.py
 # In config.py
+# --- Auto Forwarder Config ---
+# The Channel ID to take videos/photos from
+FORWARDER_SOURCE_ID = int(get_env_variable('FORWARDER_SOURCE_ID', '-1002671041761'))
+
+# List of Group IDs to post to
+FORWARDER_DEST_IDS = list(map(int, get_env_variable('FORWARDER_DEST_IDS', '-1002263740263,-1002193362290').split(",")))
+
+# Time gaps (in seconds)
+FORWARD_DELAY = 15 * 60    # 15 minutes between posts
+AUTO_DELETE_DELAY = 5 * 60 # 5 minutes after posting
 
 # Leave this empty. The bot will find free proxies automatically for you.
 INSTA_PROXIES = [] 
