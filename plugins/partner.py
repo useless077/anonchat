@@ -246,6 +246,122 @@ async def search_command(client: Client, message: Message):
                 print(f"[SEARCH] User {user1_id} or {user2_id} has blocked the bot.")
                 sessions.pop(user1_id, None)
                 sessions.pop(user2_id, None)
+# ----------------- Search Partner -----------------
+@Client.on_message(filters.command("search"))
+async def search_command(client: Client, message: Message):
+    user_id = message.from_user.id
+
+    if message.from_user.is_bot:
+        print(f"[SEARCH] Bot {user_id} tried to search. Ignoring.")
+        return
+
+    if user_id in search_flood and (datetime.utcnow() - search_flood[user_id]).total_seconds() < 3:
+        print(f"[SEARCH] User {user_id} is spamming /search command. Ignoring.")
+        return
+
+    search_flood[user_id] = datetime.utcnow()
+    print(f"[SEARCH] User {user_id} passed the anti-spam check. Proceeding.")
+    
+    async with waiting_lock:
+        if user_id in sessions:
+            await message.reply_text("**ʏᴏᴜ ᴀʀᴇ ᴀʟʀᴇᴀᴅʏ ɪɴ ᴀ ᴄʜᴀᴛ. ᴜꜱᴇ /ᴇɴᴅ ᴛᴏ ʟᴇᴀᴠᴇ ꜰɪʀꜱᴛ.**")
+            return
+        if user_id in waiting_users:
+            await message.reply_text("**ʏᴏᴜ ᴀʀᴇ ᴀʟʀᴇᴀᴅʏ ꜱᴇᴀʀᴄʜɪɴɢ ꜰᴏʀ ᴀ ᴘᴀʀᴛɴᴇʀ... ᴘʟᴇᴀꜱᴇ ᴡᴀɪᴛ.**")
+            return
+
+        waiting_users.add(user_id)
+        
+        # 1. Store the initial message
+        search_msg = await message.reply_text("🔍 **ꜱᴇᴀʀᴄʜɪɴɢ ꜰᴏʀ ᴀ ᴘᴀʀᴛɴᴇʀ...**")
+
+        # 2. Pass the message object to the functions
+        asyncio.create_task(check_partner_wait(client, user_id, search_msg))
+        asyncio.create_task(send_search_progress(client, user_id, search_msg))
+
+        if len(waiting_users) > 1:
+            user1_id = waiting_users.pop()
+            user2_id = waiting_users.pop()
+
+            try:
+                # 3. Delete the "Searching" message if a match is found
+                try:
+                    await search_msg.delete()
+                except Exception:
+                    pass
+
+                set_partner(user1_id, user2_id)
+                await db.set_partners_atomic(user1_id, user2_id)
+                await db.update_status(user1_id, "chatting")
+                await db.update_status(user2_id, "chatting")
+
+                user_objects = await client.get_users([user1_id, user2_id])
+                user1_obj, user2_obj = user_objects[0], user_objects[1]
+
+                await client.send_sticker(user1_id, CONNECTION_STICKER_ID)
+                await client.send_sticker(user2_id, CONNECTION_STICKER_ID)
+                await asyncio.sleep(0.5)
+
+                emojis = random.sample(REACTION_EMOJIS, 3)
+                emoji_string = " ".join(emojis)
+
+                user1_db = await db.get_user(user1_id)
+                user2_db = await db.get_user(user2_id)
+                profile1 = user1_db.get("profile", {})
+                profile2 = user2_db.get("profile", {})
+
+                partner2_name = profile2.get("name", "Not found")
+                partner2_age = profile2.get("age", "Not found")
+                partner2_gender = profile2.get("gender", "Not found")
+                text_for_user1 = (
+                    f"{emoji_string}\n\n"
+                    "🎉 **ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ! ʏᴏᴜ ᴀʀᴇ ᴄᴏɴɴᴇᴄᴛᴇᴅ ᴡɪᴛʜ ᴀ ᴘᴀʀᴛɴᴇʀ.**\n\n"
+                    "👤 **ᴘᴀʀᴛɴᴇʀ'ꜱ ᴅᴇᴛᴀɪʟꜱ:**\n"
+                    f"• **ɴᴀᴍᴇ:** {partner2_name}\n"
+                    f"• **ᴀɢᴇ:** {partner2_age}\n"
+                    f"• **ɢᴇɴᴅᴇʀ:** {partner2_gender}\n\n"
+                    "**ꜱᴀʏ ʜɪ ᴛᴏ ꜱᴛᴀʀᴛ ᴛʜᴇ ᴄᴏɴᴠᴇʀꜱᴀᴛɪᴏɴ!**"
+                )
+                partner1_name = profile1.get("name", "Not found")
+                partner1_age = profile1.get("age", "Not found")
+                partner1_gender = profile1.get("gender", "Not found")
+                text_for_user2 = (
+                    f"{emoji_string}\n\n"
+                    "🎉 **ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ! ʏᴏᴜ ᴀʀᴇ ᴄᴏɴɴᴇᴄᴛᴇᴅ ᴡɪᴛʜ ᴀ ᴘᴀʀᴛɴᴇʀ.**\n\n"
+                    "👤 **ᴘᴀʀᴛɴᴇʀ'ꜱ ᴅᴇᴛᴀɪʟꜱ:**\n"
+                    f"• **ɴᴀᴍᴇ:** {partner1_name}\n"
+                    f"• **ᴀɢᴇ:** {partner1_age}\n"
+                    f"• **ɢᴇɴᴅᴇʀ:** {partner1_gender}\n\n"
+                    "**ꜱᴀʏ ʜɪ ᴛᴏ ꜱᴛᴀʀᴛ ᴛʜᴇ ᴄᴏɴᴠᴇʀꜱᴀᴛɪᴏɴ!**"
+                )
+
+                await client.send_message(user1_id, text_for_user1, parse_mode=enums.ParseMode.HTML)
+                await client.send_message(user2_id, text_for_user2, parse_mode=enums.ParseMode.HTML)
+
+                print(f"[SEARCH] Successfully paired {user1_id} with {user2_id}")
+
+                def format_user_info(user):
+                    username = f"@{user.username}" if user.username else "No Username"
+                    return f"<a href='tg://user?id={user.id}'>{user.first_name}</a> ({username}) `[ID: {user.id}]`"
+
+                log_text = (
+                    f"🤝 **New Pairing**\n\n"
+                    f"👤 **User 1:** {format_user_info(user1_obj)}\n"
+                    f"👤 **User 2:** {format_user_info(user2_obj)}"
+                )
+
+                async def log_pairing():
+                    try:
+                        await client.send_message(config.LOG_CHANNEL, log_text, parse_mode=enums.ParseMode.HTML)
+                    except Exception as e:
+                        print(f"[SEARCH] Failed to log pairing: {e}")
+                
+                client.loop.create_task(log_pairing())
+
+            except UserIsBlocked:
+                print(f"[SEARCH] User {user1_id} or {user2_id} has blocked the bot.")
+                sessions.pop(user1_id, None)
+                sessions.pop(user2_id, None)
                 await db.reset_partners(user1_id, user2_id)
                 await db.update_status(user1_id, "idle")
                 await db.update_status(user2_id, "idle")
