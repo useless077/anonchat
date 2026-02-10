@@ -97,6 +97,7 @@ async def forward_worker(client):
 async def catch_up_history(client):
     """
     Runs on startup. Checks for missed videos (history) and adds them to queue.
+    Pyrogram v2 Compatible.
     """
     logger.info("🔍 Checking for missed videos...")
     
@@ -105,47 +106,43 @@ async def catch_up_history(client):
     logger.info(f"Last processed ID: {last_processed_id}")
     
     if last_processed_id == 0:
-        logger.info("⚠️ First run. Fetching ALL HISTORY (Oldest to Newest)...")
+        logger.info("⚠️ First run. Fetching last 100 messages from history...")
     else:
         logger.info("⚠️ Bot was offline. Fetching missed videos...")
 
     # 2. Iterate backwards from the latest message in the channel
-    offset_id = 0
     buffer = []
-    
-    try:
-        while True:
-            # Fetch 100 messages at a time (Going backwards)
-            messages = await client.get_chat_history(FORWARDER_SOURCE_ID, limit=100, offset_id=offset_id)
-            
-            if not messages:
-                break
-            
-            # Check each message
-            for msg in messages:
-                # If we reached a message ID that is <= our checkpoint, stop.
-                # This means we have processed everything NEWER than this ID.
-                if msg.id <= last_processed_id:
-                    # If we found our checkpoint, add whatever we collected (which are the missed ones)
-                    # Reverse the buffer because we fetched backwards (New -> Old), 
-                    # but we want to post Old -> New.
-                    if buffer:
-                        buffer.reverse()
-                        logger.info(f"📦 Found {len(buffer)} missed videos. Adding to queue...")
-                        for m in buffer:
-                            await post_queue.put(m)
-                    return # Stop fetching history
+    processed_count = 0
+    MAX_FETCH = 100  # Safety limit to prevent freezing on startup
 
-                # If it's media, add to buffer
-                if msg.photo or msg.video:
-                    buffer.append(msg)
+    try:
+        # --- FIXED: Use 'async for' instead of 'await' ---
+        async for msg in client.get_chat_history(FORWARDER_SOURCE_ID, limit=MAX_FETCH):
+            processed_count += 1
+
+            # If we reached a message ID that is <= our checkpoint, stop.
+            # This means we have processed everything NEWER than this ID.
+            if msg.id <= last_processed_id:
+                # If we found our checkpoint, add whatever we collected (which are the missed ones)
+                # Reverse the buffer because we fetched backwards (New -> Old), 
+                # but we want to post Old -> New.
+                if buffer:
+                    buffer.reverse()
+                    logger.info(f"📦 Found {len(buffer)} missed videos. Adding to queue...")
+                    for m in buffer:
+                        await post_queue.put(m)
+                return # Stop fetching history
+
+            # If it's media, add to buffer
+            if msg.photo or msg.video:
+                buffer.append(msg)
             
-            # Move the offset back further
-            offset_id = messages[-1].id
-            await asyncio.sleep(1) # Small sleep to be nice to Telegram API
+            # Stop if we hit the limit (usually on first run)
+            if processed_count >= MAX_FETCH:
+                break
 
         # If loop finishes without hitting checkpoint (last_processed_id was 0 or invalid)
-        # This means we processed the entire channel history.
+        # This means we processed the fetched chunk of history.
         if buffer:
             buffer.reverse()
             logger.info(f"📦 Finished history scan. Found {len(buffer)} total videos. Adding to queue...")
@@ -154,7 +151,6 @@ async def catch_up_history(client):
                 
     except Exception as e:
         logger.error(f"Error catching up history: {e}")
-
 
 @Client.on_message(filters.chat(FORWARDER_SOURCE_ID) & (filters.photo | filters.video))
 async def catch_media(client, message):
