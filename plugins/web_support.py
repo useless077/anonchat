@@ -5,7 +5,7 @@ import aiohttp
 import asyncio  # Added for async/thread handling
 from aiohttp import web
 from instagrapi import Client as InstaClient
-from instagrapi.exceptions import ProxyError, ChallengeRequired, LoginRequired, TwoFactorRequired
+from instagrapi.exceptions import ChallengeRequired, LoginRequired, TwoFactorRequired
 
 from database.users import db
 from config import MONGO_DB_NAME, INSTA_PROXIES
