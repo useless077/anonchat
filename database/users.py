@@ -181,6 +181,23 @@ class Database:
         """Delete the Instagram session for a specific bot."""
         await self.insta_sessions.delete_one({"_id": bot_session_name})
 
+    # --- ADD THESE METHODS INSIDE YOUR CLASS ---
+    
+    async def get_forwarder_checkpoint(self, source_id):
+        """Get the last message ID processed for a source channel."""
+        doc = await self.forwarder_checkpoint.find_one({"source_id": source_id})
+        if doc:
+            return doc.get("last_id", 0)
+        return 0
+
+    async def save_forwarder_checkpoint(self, source_id, message_id):
+        """Update the last processed message ID."""
+        await self.forwarder_checkpoint.update_one(
+            {"source_id": source_id},
+            {"$set": {"last_id": message_id}},
+            upsert=True
+        )
+
 
 # ------------------- Shared instance -------------------
 db = Database(MONGO_URI, MONGO_DB_NAME)
