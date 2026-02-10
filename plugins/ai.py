@@ -171,8 +171,6 @@ async def welcome_new_member(client: Client, message: Message):
             sent_message = await message.reply(welcome_text)
 
             # Schedule deletion if autodelete is enabled
-            if chat_id in autodelete_enabled_chats and sent_message:
-                asyncio.create_task(schedule_deletion(client, chat_id, [sent_message.id]))
                 
         except Exception as e:
             print(f"[AI] Welcome message error: {e}")
@@ -381,12 +379,6 @@ async def ai_responder(client: Client, message: Message):
     if ai_reply_text:
         bot_message_ids = await send_mixed_response(client, chat_id, message.id, ai_reply_text)
 
-    # --- 6. Schedule Auto-Delete for All Messages ---
-    if chat_id in autodelete_enabled_chats:
-        ids_to_delete = [message.id]  # Original user message
-        if bot_message_ids:           # All AI response message IDs (text + media)
-            ids_to_delete.extend(bot_message_ids)
-        asyncio.create_task(schedule_deletion(client, chat_id, ids_to_delete))
 
 # ==========================================================
 #  AUTO GREETING SYSTEM (FIXED FOR AUTO-DELETE)
@@ -416,8 +408,6 @@ async def send_greeting_message(client: Client, chat_id: int, message_type: str)
         bot_message = await client.send_message(chat_id, fancy_greeting)
         
         # Schedule deletion if autodelete is enabled
-        if chat_id in autodelete_enabled_chats and bot_message:
-            asyncio.create_task(schedule_deletion(client, chat_id, [bot_message.id]))
 
     except Exception as e: 
         print(f"[AI] Greeting error in {chat_id}: {e}")
