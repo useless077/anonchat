@@ -13,7 +13,13 @@ from plugins.ai import ai_enabled_groups
 @Client.on_message(filters.group & filters.command("start"))
 async def group_start_cmd(client, message):
     """Handle /start command in groups"""
-    await message.reply_text("ʏᴏᴜ ᴄᴀɴɴᴏᴛ ꜱᴛᴀʀᴛ ᴍᴇ ɪɴ ᴀ ɢʀᴏᴜᴘ. ᴛʀʏ ɪɴ ᴘʀɪᴠᴀᴛᴇ ᴄʜᴀᴛ.")
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🤖 Start in PM", url=f"https://t.me/{(await client.get_me()).username}")]
+    ])
+    await message.reply_text(
+        "ʏᴏᴜ ᴄᴀɴɴᴏᴛ ꜱᴛᴀʀᴛ ᴍᴇ ɪɴ ᴀ ɢʀᴏᴜᴘ. ᴄʟɪᴄᴋ ʙᴇʟᴏᴡ ᴛᴏ ᴜꜱᴇ ᴍᴇ ɪɴ ᴘʀɪᴠᴀᴛᴇ ᴄʜᴀᴛ.",
+        reply_markup=buttons
+    )
 
 @Client.on_message(filters.private & filters.command("start"))
 async def start_cmd(client, message):
@@ -25,7 +31,6 @@ async def start_cmd(client, message):
     user = await db.get_user(user_id)
 
     if not user:  # First time user
-        # --- CHANGE 1: Added user_type="user" ---
         await db.add_user(user_id, {
             "name": "",
             "gender": "",
@@ -51,7 +56,10 @@ async def start_cmd(client, message):
             )
         except Exception as e:
             print(f"[LOG ERROR] Could not send to log channel: {e}")
-            
+
+    # Get Bot Username dynamically for the "Add to Group" link
+    me = await client.get_me()
+    bot_username = me.username if me.username else "venumabot"
 
     welcome_text = (
         "👋 **ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ ᴏᴜʀ ᴘᴏᴡᴇʀꜰᴜʟ ᴄʜᴀᴛ ʙᴏᴛ!**\n\n"
@@ -69,10 +77,21 @@ async def start_cmd(client, message):
         "• ɪ ᴡɪʟʟ ᴄʜᴀᴛ ɴᴀᴛᴜʀᴀʟʟʏ ɪɴ ʏᴏᴜʀ ɢʀᴏᴜᴘ!"
     )
 
+    # --- UPDATED BUTTONS LAYOUT ---
     buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Main Channel", url="https://t.me/venuma")],
-        [InlineKeyboardButton("🔍 Search Partner", callback_data="search")],
-        [InlineKeyboardButton("Bot Status", callback_data="bot_status")]
+        # Row 1: Main Channel and XTamil Chat
+        [
+            InlineKeyboardButton("Main Channel", url="https://t.me/venuma"),
+            InlineKeyboardButton("XTamil Chat", url="https://t.me/xtamilchat")
+        ],
+        # Row 2: Add to Group
+        [
+            InlineKeyboardButton("➕ Add to Your Group", url=f"https://t.me/{bot_username}?startgroup=true")
+        ],
+        # Row 3: Find Your Partner
+        [
+            InlineKeyboardButton("🔍 Find Your Partner", callback_data="search")
+        ]
     ])
 
     await message.reply_photo(
@@ -86,6 +105,7 @@ async def start_cmd(client, message):
 @Client.on_callback_query(filters.regex("^search$"))
 async def search_cb(client, query):
     await query.answer()
+    # Call search_command directly. This will start the search process.
     await search_command(client, query.message)
 
 @Client.on_callback_query(filters.regex("^bot_status$"))
@@ -94,7 +114,6 @@ async def bot_status_cb(client, query):
     await query.answer()
     
     try:
-        # --- CHANGE 2: Using new database methods for stats ---
         total_users = await db.get_total_users()
         active_chats = await db.get_active_chats()
         ai_groups = len(ai_enabled_groups)
@@ -124,7 +143,6 @@ async def new_group(client, message):
     
     for member in message.new_chat_members:
         if member.id == bot_id:
-            # --- CHANGE 3: Added user_type="group" ---
             await db.add_user(message.chat.id, {"title": message.chat.title}, user_type="group")
 
             try:
