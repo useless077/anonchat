@@ -72,46 +72,73 @@ async def status_cmd(client: Client, message: Message):
 
     await message.reply(status_text, parse_mode=enums.ParseMode.MARKDOWN)
 
-# --- AUTODELETE COMMAND (group only) ---
+# --- AUTODELETE COMMAND (Group Only) ---
 @Client.on_message(filters.command("autodelete") & filters.group)
 async def toggle_autodelete(client: Client, message: Message):
     print(f"[AutoDelete Command] Triggered in {message.chat.id} by {message.from_user.id}")
+    
+    # 1. Check if user is Admin
     try:
         member = await client.get_chat_member(message.chat.id, message.from_user.id)
         if member.status not in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER):
             return await message.reply("❌ Only group admins can use this command.")
+    except Exception:
+        return await message.reply("❌ Error checking your permissions.")
 
+    # 2. Check if Bot has Delete Permission
+    try:
         bot_member = await client.get_chat_member(message.chat.id, client.me.id)
         if not bot_member.privileges or not getattr(bot_member.privileges, "can_delete_messages", False):
-            return await message.reply("⚠️ I need 'Delete Messages' permission to manage autodelete.")
+            # REQUESTED MESSAGE: "hey idiot first give me delete permission then use this function"
+            return await message.reply("Hey idiot, first give me **Delete Messages** permission then use this function! 🤬")
+    except Exception:
+        return await message.reply("⚠️ I couldn't check my own permissions.")
 
-        arg = message.command[1].lower() if len(message.command) > 1 else None
-        if not arg:
-            status = await db.get_autodelete_status(message.chat.id)
-            return await message.reply(f"AutoDelete is currently **{'ON ✅' if status else 'OFF ❌'}**")
+    arg = message.command[1].lower() if len(message.command) > 1 else None
+    
+    if not arg:
+        status = await db.get_autodelete_status(message.chat.id)
+        return await message.reply(f"AutoDelete is currently **{'ON ✅' if status else 'OFF ❌'}**")
 
-        if arg == "on":
-            await db.set_autodelete_status(message.chat.id, True)
-            autodelete_enabled_chats.add(message.chat.id)
-            return await message.reply("🧹 AutoDelete **enabled** — media will be deleted after 1 hour.")
-        elif arg == "off":
-            await db.set_autodelete_status(message.chat.id, False)
-            autodelete_enabled_chats.discard(message.chat.id)
-            return await message.reply("🧹 AutoDelete **disabled**.")
-        else:
-            return await message.reply("Usage: `/autodelete on` or `/autodelete off`")
-    except Exception as e:
-        print(f"[AutoDelete Command] Error: {e}")
-        return await message.reply("⚠️ Something went wrong while processing this command.")
+    if arg == "on":
+        await db.set_autodelete_status(message.chat.id, True)
+        autodelete_enabled_chats.add(message.chat.id)
+        return await message.reply("🧹 AutoDelete **enabled** — All media (Stickers, GIFs, Videos, etc.) will be deleted after 1 hour.")
+    elif arg == "off":
+        await db.set_autodelete_status(message.chat.id, False)
+        autodelete_enabled_chats.discard(message.chat.id)
+        return await message.reply("🧹 AutoDelete **disabled**.")
+    else:
+        return await message.reply("Usage: `/autodelete on` or `/autodelete off`")
 
-# --- GROUP AUTO DELETE MEDIA ---
-@Client.on_message(filters.group & filters.media, group=2)
+
+# --- GLOBAL AUTO DELETE HANDLER ---
+# This catches ALL media (Bot's and User's) in groups where autodelete is ON
+@Client.on_message(
+    filters.group & (
+        filters.photo | 
+        filters.video | 
+        filters.audio | 
+        filters.document | 
+        filters.sticker | 
+        filters.animation | 
+        filters.voice
+    ), 
+    group=2
+)
 async def auto_delete_group_media(client: Client, message: Message):
     """
-    Delete media messages in groups if autodelete is enabled.
+    Delete media messages (including Bot's own media) after 1 hour 
+    if autodelete is enabled for the group.
     """
-    if message.chat.id not in autodelete_enabled_chats:
+    chat_id = message.chat.id
+
+    # Check if this group has AutoDelete enabled
+    if chat_id not in autodelete_enabled_chats:
         return
+
+    print(f"[AUTODELETE] Scheduling deletion of message {message.id} (Type: {message.media}) in chat {chat_id}")
     
-    print(f"[AUTODELETE] Scheduling deletion of group media message {message.id} in chat {message.chat.id}")
-    await schedule_deletion(client, message.chat.id, [message.id], delay=AUTO_DELETE_DELAY)
+    # Schedule deletion in the background (Non-blocking)
+    # We pass [message.id] as a list because the utility expects a list
+    asyncio.create_task(schedule_deletion(client, chat_id, [message.id], delay=AUTO_DELETE_DELAY))
