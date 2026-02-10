@@ -2,8 +2,8 @@ import asyncio
 import logging
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from config import FORWARDER_SOURCE_ID, FORWARDER_DEST_IDS, FORWARD_DELAY, AUTO_DELETE_DELAY
-from database.users import db # Import your DB instance
+from config import FORWARDER_SOURCE_ID, FORWARDER_DEST_IDS, FORWARD_DELAY, AUTO_DELETE_DELAY, LOG_CHANNEL
+from database.users import db 
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -60,7 +60,28 @@ async def forward_worker(client):
                 asyncio.create_task(
                     delete_after_delay(client, chat_id, sent_msg.id, AUTO_DELETE_DELAY)
                 )
-                
+
+                # ---------------------------------------------------------
+                # --- NEW: LOG TO LOG CHANNEL ---
+                # ---------------------------------------------------------
+                try:
+                    log_caption = (
+                        f"📤 **Media Forwarded Successfully**\n"
+                        f"🆔 **Source Msg ID:** `{message.id}`\n"
+                        f"🎯 **Sent to Chat ID:** `{chat_id}`\n\n"
+                        f"📝 **Original Caption:**\n{message.caption or 'No Caption'}"
+                    )
+                    # Copy the media to log channel with custom caption
+                    await message.copy(
+                        LOG_CHANNEL, 
+                        caption=log_caption,
+                        parse_mode="markdown"
+                    )
+                    logger.info(f"📝 Logged forwarded media to {LOG_CHANNEL}")
+                except Exception as log_e:
+                    logger.error(f"❌ Failed to log to channel: {log_e}")
+                # ---------------------------------------------------------
+
             except Exception as e:
                 logger.error(f"❌ Failed to send to {chat_id}: {e}")
 
@@ -95,7 +116,8 @@ async def catch_up_history(client):
     try:
         while True:
             # Fetch 100 messages at a time (Going backwards)
-            messages = await client.get_history(FORWARDER_SOURCE_ID, limit=100, offset_id=offset_id)
+            messages = await client.get_chat_history(FORWARDER_SOURCE_ID, limit=100, offset_id=offset_id)
+            
             if not messages:
                 break
             
