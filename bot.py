@@ -74,8 +74,8 @@ class Bot(Client):
             
             # --- ✅ NEW: Start Auto Forwarder ---
             # 1. First, check history and fill queue with old videos
-            logging.info("Starting Auto Forwarder History Check...")
-            asyncio.create_task(catch_up_history(self))
+           # logging.info("Starting Auto Forwarder History Check...")
+           # asyncio.create_task(catch_up_history(self))
 
             # 2. Then, start the worker that posts videos every 15 mins
             logging.info("Starting Auto Forwarder Worker...")
