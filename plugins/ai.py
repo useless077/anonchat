@@ -343,8 +343,8 @@ async def ai_responder(client: Client, message: Message):
     )
     direct_interaction = is_reply_to_bot or is_tagged
 
-    print(f"[AI] Processing message: {message.text or 'Media'} from {message.from_user.first_name} in chat {chat_id}")
-    print(f"[AI] Direct interaction: {direct_interaction}, Sticker: {bool(message.sticker)}, GIF: {bool(message.animation)}")
+   # print(f"[AI] Processing message: {message.text or 'Media'} from {message.from_user.first_name} in chat {chat_id}")
+  #  print(f"[AI] Direct interaction: {direct_interaction}, Sticker: {bool(message.sticker)}, GIF: {bool(message.animation)}")
 
     bot_message_ids = []
     ai_reply_text = None
