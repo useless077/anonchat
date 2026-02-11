@@ -531,7 +531,7 @@ async def relay_all(client: Client, message: Message):
                 partner_id = None
     
     if not partner_id:
-        await message.reply_text("⚠️ **ʏᴏᴜ ᴀʀᴇ ɴᴏᴛ ᴄᴏɴɴᴇᴄᴛᴇᴅ ᴡɪᴛʜ ᴀ ᴘᴀʀᴛɴᴇʀ. ᴜꜱᴇ /ꜱᴇᴀʀᴄʜ.**")
+        await message.reply_text("⚠️ **ʏᴏᴜ ᴀʀᴇ ɴᴏᴛ ᴄᴏɴɴᴇᴄᴛᴇᴅ ᴡɪᴛʜ ᴀ ᴘᴀʀᴛɴᴇʀ. ᴜꜱᴇ /search.**")
         return
 
     try:
@@ -573,11 +573,11 @@ async def relay_all(client: Client, message: Message):
 
     except Exception as e:
         print(f"[relay_all] Relay failed for {user_id}: {e}")
-        await client.send_message(user_id, "❌ **ᴍᴇꜱꜱᴀɢᴇ ꜰᴀɪʟᴇᴅ. ᴄᴏɴɴᴇᴄᴛɪᴏɴ ᴇɴᴅᴇᴅ. ᴜꜱᴇ /ꜱᴇᴀʀᴄʜ ᴛᴏ ꜰɪɴᴅ ᴀ ɴᴇᴡ ᴘᴀʀᴛɴᴇʀ.**")
+        await client.send_message(user_id, "❌ **ᴍᴇꜱꜱᴀɢᴇ ꜰᴀɪʟᴇᴅ. ᴄᴏɴɴᴇᴄᴛɪᴏɴ ᴇɴᴅᴇᴅ. ᴜꜱᴇ /search ᴛᴏ ꜰɪɴᴅ ᴀ ɴᴇᴡ ᴘᴀʀᴛɴᴇʀ.**")
         sessions.pop(user_id, None)
         await db.update_status(user_id, "idle")
         if partner_id:
-            await client.send_message(partner_id, "❌ **ᴄᴏɴɴᴇᴄᴛɪᴏɴ ʟᴏꜱᴛ ᴅᴜᴇ ᴛᴏ ᴀɴ ᴇʀʀᴏʀ. ᴜꜱᴇ /ꜱᴇᴀʀᴄʜ ᴛᴏ ꜰɪɴᴅ ᴀ ɴᴇᴡ ᴘᴀʀᴛɴᴇʀ.**")
+            await client.send_message(partner_id, "❌ **ᴄᴏɴɴᴇᴄᴛɪᴏɴ ʟᴏꜱᴛ ᴅᴜᴇ ᴛᴏ ᴀɴ ᴇʀʀᴏʀ. ᴜꜱᴇ /search ᴛᴏ ꜰɪɴᴅ ᴀ ɴᴇᴡ ᴘᴀʀᴛɴᴇʀ.**")
             sessions.pop(partner_id, None)
             await db.reset_partners(user_id, partner_id)
             await db.update_status(partner_id, "idle")
