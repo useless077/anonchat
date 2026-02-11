@@ -49,7 +49,7 @@ async def start_cmd(client, message):
             "dp": None
         }, user_type="user")
         is_new_user = True
-        user = await db.get_user(user_id) # Refresh user object
+        user = await db.get_user(user_id) 
 
         # Log new user to channel
         try:
@@ -72,7 +72,7 @@ async def start_cmd(client, message):
     profile = user.get("profile", {})
     has_profile = bool(profile and profile.get("name"))
 
-    # 3. Handle Start Arguments (e.g., from group button)
+    # 3. Handle Start Arguments
     if len(message.command) > 1:
         arg = message.command[1]
         if arg == "WelcomeMessage":
@@ -113,21 +113,11 @@ async def start_cmd(client, message):
         )
         
         buttons = InlineKeyboardMarkup([
-            # Row 1: Main Actions
-            [
-                InlineKeyboardButton("🔍 ꜱᴇᴀʀᴄʜ ᴘᴀʀᴛɴᴇʀ", callback_data="menu_search"),
-                InlineKeyboardButton("👤 ᴍʏ ᴘʀᴏꜰɪʟᴇ", callback_data="menu_profile")
-            ],
-            # Row 2: External Links
-            [
-                InlineKeyboardButton("Main Channel", url="https://t.me/venuma"),
-                InlineKeyboardButton("XTamil Chat", url="https://t.me/xtamilchat")
-            ],
-            # Row 3: Add to Group & Help
-            [
-                InlineKeyboardButton("➕ ᴀᴅᴅ ᴛᴏ ɢʀᴏᴜᴘ", url=f"https://t.me/{config.BOT_USERNAME}?startgroup=true"),
-                InlineKeyboardButton("📜 ʜᴇʟᴘ", callback_data="menu_help")
-            ]
+            [InlineKeyboardButton("🔍 ꜱᴇᴀʀᴄʜ ᴘᴀʀᴛɴᴇʀ", callback_data="menu_search")],
+            [InlineKeyboardButton("👤 ᴍʏ ᴘʀᴏꜰɪʟᴇ", callback_data="menu_profile")],
+            [InlineKeyboardButton("Main Channel", url="https://t.me/venuma"), InlineKeyboardButton("XTamil Chat", url="https://t.me/xtamilchat")],
+            [InlineKeyboardButton("➕ ᴀᴅᴅ ᴛᴏ ɢʀᴏᴜᴘ", url=f"https://t.me/{config.BOT_USERNAME}?startgroup=true")],
+            [InlineKeyboardButton("📜 ʜᴇʟᴘ", callback_data="menu_help")]
         ])
         
         await message.reply_photo(
@@ -144,7 +134,7 @@ async def start_cmd(client, message):
 async def create_profile_cb(client, query):
     """Handles the 'Create Profile' button click."""
     user_id = query.from_user.id
-    await query.message.delete()
+    await query.message.delete() # Delete the menu, we need to chat now
     
     # Initialize the profile state manually
     profile_states[user_id] = "name"
@@ -160,16 +150,39 @@ async def create_profile_cb(client, query):
 @Client.on_callback_query(filters.regex("^menu_search$"))
 async def menu_search_cb(client, query):
     """Handles the 'Search' button click."""
+    # We don't edit here, we delete menu and send /search command
+    # because the search process is complex (timers, messages)
     await query.message.delete()
-    # Trigger search by simulating a /search command
     await client.send_message(query.from_user.id, "/search")
 
 
 @Client.on_callback_query(filters.regex("^menu_profile$"))
 async def menu_profile_cb(client, query):
     """Handles the 'My Profile' button click."""
-    await query.message.delete()
-    await client.send_message(query.from_user.id, "/myprofile")
+    # FIXED: We now fetch data and EDIT the message instead of sending a command
+    user_id = query.from_user.id
+    user = await db.get_user(user_id)
+    profile = user.get("profile", {}) if user else {}
+    
+    if not profile or not profile.get("name"):
+        await query.answer("⚠️ Profile not found. Please create one.")
+        return
+
+    caption = "👤 **ʏᴏᴜʀ ᴘʀᴏꜰɪʟᴇ**\n\n"
+    caption += f"• **ɴᴀᴍᴇ:** {profile.get('name','')}\n"
+    caption += f"• **ɢᴇɴᴅᴇʀ:** {profile.get('gender','')}\n"
+    caption += f"• **ᴀɢᴇ:** {profile.get('age','')}\n"
+    caption += f"• **ʟᴏᴄᴀᴛɪᴏɴ:** {profile.get('location','')}\n"
+    
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 ʙᴀᴄᴋ", callback_data="back_to_start")]
+    ])
+    
+    try:
+        await query.message.edit_caption(caption, reply_markup=buttons)
+        await query.answer()
+    except Exception as e:
+        print(f"[START] Error editing profile: {e}")
 
 
 @Client.on_callback_query(filters.regex("^menu_help$"))
@@ -190,17 +203,20 @@ async def menu_help_cb(client, query):
         "2. ɴᴏ ꜱᴘᴀᴍᴍɪɴɢ ᴏʀ ɪʟʟᴇɢᴀʟ ᴄᴏɴᴛᴇɴᴛ."
     )
     
-    # Added a Bot Status button in help menu
     buttons = InlineKeyboardMarkup([
         [InlineKeyboardButton("📊 ʙᴏᴛ ꜱᴛᴀᴛᴜꜱ", callback_data="bot_status")],
         [InlineKeyboardButton("🔙 ʙᴀᴄᴋ", callback_data="back_to_start")]
     ])
-    await query.message.edit_text(help_text, reply_markup=buttons)
+    
+    try:
+        await query.message.edit_caption(help_text, reply_markup=buttons)
+        await query.answer()
+    except Exception as e:
+        print(f"[START] Error editing help: {e}")
 
 @Client.on_callback_query(filters.regex("^bot_status$"))
 async def bot_status_cb(client, query):
     """Handles the 'Bot Status' button click."""
-    await query.answer()
     try:
         total_users = await db.get_total_users()
         active_chats = await db.get_active_chats()
@@ -216,21 +232,53 @@ async def bot_status_cb(client, query):
             f"⚡ **ʙᴏᴛ ꜱᴛᴀᴛᴜꜱ:** `ᴏɴʟɪɴᴇ`"
         )
         
-        # Reuse the Back button
         buttons = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 ʙᴀᴄᴋ", callback_data="menu_help")]
         ])
-        await query.message.edit_text(status_text, reply_markup=buttons, parse_mode=enums.ParseMode.MARKDOWN)
+        await query.message.edit_caption(status_text, reply_markup=buttons, parse_mode=enums.ParseMode.MARKDOWN)
+        await query.answer()
 
     except Exception as e:
-        print(f"[BOT_STATUS_CB] Error fetching status: {e}")
+        print(f"[BOT_STATUS_CB] Error: {e}")
         await query.message.reply_text("ꜱᴏʀʀʏ, ᴄᴏᴜʟᴅɴ'ᴛ ꜰᴇᴛᴄʜ ꜱᴛᴀᴛᴜꜱ ʀɪɢʜᴛ ɴᴏᴡ.")
 
 @Client.on_callback_query(filters.regex("^back_to_start$"))
 async def back_to_start_cb(client, query):
-    """Handles the 'Back' button."""
-    await query.message.delete()
-    await client.send_message(query.from_user.id, "/start")
+    """Handles the 'Back' button. FIXED: Edits message back to Main Menu."""
+    user_id = query.from_user.id
+    user = await db.get_user(user_id)
+    profile = user.get("profile", {}) if user else {}
+    has_profile = bool(profile and profile.get("name"))
+
+    if not has_profile:
+        # --- USER HAS NO PROFILE ---
+        text = (
+            f"👋 **ʜᴇʟʟᴏ!**\n\n"
+            "ᴛᴏ ꜱᴛᴀʀᴛ ᴜꜱɪɴɢ ᴛʜᴇ ʙᴏᴛ, ʏᴏᴜ ɴᴇᴇᴅ ᴛᴏ ꜱᴇᴛᴜᴘ ʏᴏᴜʀ ᴘʀᴏꜰɪʟᴇ ꜰɪʀꜱᴛ."
+        )
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✏️ ᴄʀᴇᴀᴛᴇ ᴘʀᴏꜰɪʟᴇ", callback_data="create_profile_flow")]
+        ])
+    else:
+        # --- USER HAS PROFILE ---
+        name = profile.get('name', 'User')
+        text = (
+            f"ʜᴇʏ **{name}**! 🧚‍♀\n\n"
+            "ɪ ᴀᴍ ᴀ ᴘᴏᴡᴇʀꜰᴜʟ ᴀɪ ᴀɴᴅ ᴀɴᴏɴʏᴍᴏᴜꜱ ᴄʜᴀᴛ ʙᴏᴛ."
+        )
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔍 ꜱᴇᴀʀᴄʜ ᴘᴀʀᴛɴᴇʀ", callback_data="menu_search")],
+            [InlineKeyboardButton("👤 ᴍʏ ᴘʀᴏꜰɪʟᴇ", callback_data="menu_profile")],
+            [InlineKeyboardButton("Main Channel", url="https://t.me/venuma"), InlineKeyboardButton("XTamil Chat", url="https://t.me/xtamilchat")],
+            [InlineKeyboardButton("➕ ᴀᴅᴅ ᴛᴏ ɢʀᴏᴜᴘ", url=f"https://t.me/{config.BOT_USERNAME}?startgroup=true")],
+            [InlineKeyboardButton("📜 ʜᴇʟᴘ", callback_data="menu_help")]
+        ])
+
+    try:
+        await query.message.edit_caption(text, reply_markup=buttons, parse_mode=enums.ParseMode.HTML)
+        await query.answer()
+    except Exception as e:
+        print(f"[BACK_BTN] Error: {e}")
 
 
 # ----------------- Group Added Handler -----------------
