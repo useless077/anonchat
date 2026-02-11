@@ -58,7 +58,7 @@ ENABLE_PREF_MATCH = get_env_variable('ENABLE_PREF_MATCH', 'false').lower() == "t
 
 # --- Auto Forwarder Config ---
 # The Channel ID to take videos/photos from
-FORWARDER_SOURCE_ID = int(get_env_variable('FORWARDER_SOURCE_ID', '-1002671041761'))
+FORWARDER_SOURCE_ID = int(get_env_variable('FORWARDER_SOURCE_ID', '-1003222215181'))
 
 # List of Group IDs to post to
 FORWARDER_DEST_IDS = list(map(int, get_env_variable('FORWARDER_DEST_IDS', '-1002263740263,-1002193362290').split(",")))
