@@ -150,16 +150,14 @@ async def create_profile_cb(client, query):
 @Client.on_callback_query(filters.regex("^menu_search$"))
 async def menu_search_cb(client, query):
     """Handles the 'Search' button click."""
-    # We don't edit here, we delete menu and send /search command
-    # because the search process is complex (timers, messages)
     await query.message.delete()
-    await client.send_message(query.from_user.id, "/search")
+    # FIXED: Sends the instruction message instead of running command directly
+    await client.send_message(query.from_user.id, "🔍 **To find your partner use /search command**")
 
 
 @Client.on_callback_query(filters.regex("^menu_profile$"))
 async def menu_profile_cb(client, query):
     """Handles the 'My Profile' button click."""
-    # FIXED: We now fetch data and EDIT the message instead of sending a command
     user_id = query.from_user.id
     user = await db.get_user(user_id)
     profile = user.get("profile", {}) if user else {}
@@ -168,14 +166,18 @@ async def menu_profile_cb(client, query):
         await query.answer("⚠️ Profile not found. Please create one.")
         return
 
-    caption = "👤 **ʏᴏᴜʀ ᴘʀᴏꜰɪʟᴇ**\n\n"
-    caption += f"• **ɴᴀᴍᴇ:** {profile.get('name','')}\n"
-    caption += f"• **ɢᴇɴᴅᴇʀ:** {profile.get('gender','')}\n"
-    caption += f"• **ᴀɢᴇ:** {profile.get('age','')}\n"
-    caption += f"• **ʟᴏᴄᴀᴛɪᴏɴ:** {profile.get('location','')}\n"
+    # FIXED: Shows current details + Option to update
+    caption = (
+        "✅ **You are already setted the profile**\n\n"
+        f"**Name:** {profile.get('name','')}\n"
+        f"**Age:** {profile.get('age','')}\n"
+        f"**Location:** {profile.get('location','')}\n\n"
+        "If you want to update your profile, click below."
+    )
     
     buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔙 ʙᴀᴄᴋ", callback_data="back_to_start")]
+        [InlineKeyboardButton("✅ Confirm", callback_data="back_to_start")],
+        [InlineKeyboardButton("✏️ Update Profile", callback_data="create_profile_flow")]
     ])
     
     try:
