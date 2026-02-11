@@ -140,5 +140,100 @@ async def auto_delete_group_media(client: Client, message: Message):
     print(f"[AUTODELETE] Scheduling deletion of message {message.id} (Type: {message.media}) in chat {chat_id}")
     
     # Schedule deletion in the background (Non-blocking)
-    # We pass [message.id] as a list because the utility expects a list
     asyncio.create_task(schedule_deletion(client, chat_id, [message.id], delay=AUTO_DELETE_DELAY))
+
+
+# ==========================================================
+#  AGGRESSIVE ANTI-SPAM SYSTEM
+# ==========================================================
+
+# Regex to catch: Links, Channel Invites, and Bot Usernames (@SomethingBot)
+SPAM_PATTERN = r'(https?://\S+|t\.me/\S+|telegram\.me/\S+|@\w+bot)'
+
+@Client.on_message(
+    filters.group & 
+    filters.text & 
+    filters.regex(SPAM_PATTERN) & 
+    ~filters.user(ADMIN_IDS) & 
+    ~filters.command(["ai", "autodelete", "start", "search", "next", "end", "myprofile", "profile", "cancel", "broadcast", "status"])
+)
+async def anti_spam_delete(client: Client, message: Message):
+    """
+    Automatically deletes messages containing links or bot tags from non-admins.
+    """
+    try:
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+
+        # Double check if user is an Admin in this specific group
+        member = await client.get_chat_member(chat_id, user_id)
+        if member.status in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER):
+            return # Allow admins to post links
+
+        # --- SPAM CHECK 1: Links & Bot Usernames ---
+        # If the regex above caught it, delete immediately.
+        await message.delete()
+        await _log_spam(client, user_id, message, "Link or Bot Username")
+        return
+
+    except Exception as e:
+        print(f"[ANTI_SPAM] Error: {e}")
+
+
+@Client.on_message(
+    filters.group & 
+    filters.text & 
+    ~filters.user(ADMIN_IDS) & 
+    ~filters.command(["ai", "autodelete", "start", "search", "next", "end", "myprofile", "profile", "cancel", "broadcast", "status"])
+)
+async def anti_spam_heavy(client: Client, message: Message):
+    """
+    Checks for Long Messages and Forwarded Spam.
+    """
+    try:
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+
+        # Check if user is an Admin
+        member = await client.get_chat_member(chat_id, user_id)
+        if member.status in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER):
+            return 
+
+        text = message.text or ""
+        reason = None
+
+        # --- SPAM CHECK 2: Long Messages (Copy-Paste Spam) ---
+        if len(text) > 300: # If message is longer than 300 chars
+            reason = "Too Long Message"
+
+        # --- SPAM CHECK 3: Forwarded from Channel (Ads) ---
+        # Note: We don't block forwarded from *users*, only *channels* (forward_from_chat)
+        elif message.forward_from_chat:
+            reason = "Forwarded from Channel"
+
+        if reason:
+            await message.delete()
+            await _log_spam(client, user_id, message, reason)
+            return
+
+    except Exception as e:
+        print(f"[ANTI_SPAM HEAVY] Error: {e}")
+
+
+async def _log_spam(client: Client, user_id: int, message: Message, reason: str):
+    """Helper to log deletion."""
+    try:
+        # Get a snippet of the message
+        text_snippet = (message.text or message.caption or "")[:50]
+        
+        log_text = (
+            f"🚫 **Auto-Deleted Spam**\n\n"
+            f"👤 **User:** <a href='tg://user?id={user_id}'>{message.from_user.first_name}</a>\n"
+            f"🆔 **User ID:** `{user_id}`\n"
+            f"💬 **Group:** `{message.chat.title}`\n"
+            f"⚠️ **Reason:** {reason}\n"
+            f"📝 **Snippet:** `{text_snippet}...`"
+        )
+        await client.send_message(config.LOG_CHANNEL, log_text, parse_mode=enums.ParseMode.HTML)
+    except Exception:
+        pass
