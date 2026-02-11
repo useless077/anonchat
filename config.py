@@ -24,7 +24,7 @@ def get_env_variable(var_name, default=None):
 # Telegram Bot
 BOT_TOKEN = get_env_variable('BOT_TOKEN')
 # --- ADDED THIS LINE FOR THE BUTTON ---
-BOT_USERNAME = get_env_variable('BOT_USERNAME', 'YourActualBotUsername') 
+BOT_USERNAME = get_env_variable('BOT_USERNAME', 'TamilAnonymousChatBot') 
 # -------------------------------------
 
 API_ID = int(get_env_variable('API_ID', '1779071'))
