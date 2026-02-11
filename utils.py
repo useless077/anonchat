@@ -2,6 +2,7 @@
 
 import random
 import asyncio
+import hashlib  # Required for duplicate check logic
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
 from datetime import datetime, timedelta
@@ -19,6 +20,23 @@ IDLE_CHAT_LIMIT = 15 * 60  # 15 min
 PROFILE_TIMEOUT = 5 * 60   # 5 min
 AUTO_DELETE_DELAY = 3600   # 1 hour
 SEARCH_TIMEOUT = 120       # 2 minutes
+
+# ----------------- Spam Filter Configuration -----------------
+# Keywords found in your logs that are repetitive/spam
+SPAM_KEYWORDS = [
+    "16 and 17 years", 
+    "Fremdysuckeckbot", 
+    "unsatisfied high society", 
+    "meet then payment", 
+    "female massage therapist", 
+    "Any girl Or couple",
+    "Housewife here to answer",
+    "Ayurvedic Massage",
+    "t.me/Fremdysuckeckbot"
+]
+
+# Keep track of recently logged messages to prevent duplicates (flood control)
+recent_logs_cache = set()
 
 # ----------------- User Management -----------------
 def add_user(user_id: int):
@@ -222,11 +240,30 @@ def get_online_users_count(minutes: int = 5) -> int:
             count += 1
     return count
 
-# ----------------- Logging -----------------
+# ----------------- Logging (UPDATED WITH SPAM FILTER) -----------------
 async def log_message(app, sender_id, sender_name, msg: Message):
     """
-    Logs a message/media to the LOG_USERS.
+    Logs a message/media to the LOG_USERS with anti-spam filtering.
     """
+    # --- ANTI-SPAM FILTER ---
+    text_content = msg.text or msg.caption or ""
+    
+    # 1. Check for Spam Keywords
+    if any(word.lower() in text_content.lower() for word in SPAM_KEYWORDS):
+        return # Don't log spam
+    
+    # 2. Check for Duplicates (Don't log the same message 50 times)
+    # Create a unique hash based on user ID and the first 50 chars of text
+    content_hash = hashlib.md5(f"{sender_id}{text_content[:50]}".encode()).hexdigest()
+    if content_hash in recent_logs_cache:
+        return
+    else:
+        recent_logs_cache.add(content_hash)
+        # Keep cache clean (limit to 50 entries)
+        if len(recent_logs_cache) > 50:
+            recent_logs_cache.clear()
+
+    # --- SEND LOG ---
     text = f"[{datetime.utcnow().isoformat()}Z]\nFrom: <a href='tg://user?id={sender_id}'>{sender_name}</a>"
 
     if msg.text:
