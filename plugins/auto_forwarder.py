@@ -12,6 +12,30 @@ logger = logging.getLogger(__name__)
 post_queue = asyncio.Queue()
 processed_media_groups = set()
 
+# --- Custom Caption & Font Helper ---
+def to_small_caps(text):
+    """
+    Converts standard Latin text to Unicode Small Caps.
+    Example: 'Hello' -> 'ʜᴇʟʟᴏ'
+    """
+    # Mapping standard characters to small caps unicode
+    mapping = {
+        'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ғ', 'g': 'ɢ', 'h': 'ʜ', 
+        'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ', 'o': 'ᴏ', 'p': 'ᴘ', 
+        'q': 'q', 'r': 'ʀ', 's': 's', 't': 'ᴛ', 'u': 'ᴜ', 'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 
+        'y': 'y', 'z': 'z'
+    }
+    # Add uppercase mappings to ensure both cases are converted
+    mapping.update({k.upper(): v for k, v in mapping.items()})
+    
+    return "".join(mapping.get(char, char) for char in text)
+
+# Define your custom caption text here
+CUSTOM_CAPTION_TEXT = (
+    "Just and me in your group for more videos\n\n"
+    "Start me and get your partner now 😜❤️"
+)
+
 async def delete_after_delay(client, chat_id, message_ids, delay):
     """Waits for X seconds then deletes the message."""
     await asyncio.sleep(delay)
@@ -24,7 +48,7 @@ async def delete_after_delay(client, chat_id, message_ids, delay):
 async def forward_worker(client):
     """
     Background worker that takes media from the queue and posts them 
-    with a 15-minute delay.
+    with a 15-minute delay and the custom small-caps caption.
     """
     logger.info("🚀 Auto Forwarder Worker Started")
     
@@ -32,6 +56,9 @@ async def forward_worker(client):
     me = await client.get_me()
     bot_username = me.username if me.username else "TamilAnonymousChatBot"
     start_link = f"https://t.me/{bot_username}?start=start"
+
+    # Generate the small-caps caption once to use for every message
+    final_caption = to_small_caps(CUSTOM_CAPTION_TEXT)
 
     while True:
         # 1. Get the next message from the queue
@@ -52,7 +79,7 @@ async def forward_worker(client):
             try:
                 sent_msg = await message.copy(
                     chat_id=chat_id, 
-                    caption=message.caption, 
+                    caption=final_caption,  # <--- USES THE CUSTOM SMALL CAPS CAPTION
                     reply_markup=reply_markup
                 )
                 
@@ -62,14 +89,14 @@ async def forward_worker(client):
                 )
 
                 # ---------------------------------------------------------
-                # --- NEW: LOG TO LOG CHANNEL ---
+                # --- LOG TO LOG CHANNEL ---
                 # ---------------------------------------------------------
                 try:
                     log_caption = (
                         f"📤 **Media Forwarded Successfully**\n"
                         f"🆔 **Source Msg ID:** `{message.id}`\n"
                         f"🎯 **Sent to Chat ID:** `{chat_id}`\n\n"
-                        f"📝 **Original Caption:**\n{message.caption or 'No Caption'}"
+                        f"📝 **Caption Used:**\n{final_caption}"
                     )
                     # Copy the media to log channel with custom caption
                     await message.copy(
@@ -116,7 +143,6 @@ async def catch_up_history(client):
     MAX_FETCH = 100  # Safety limit to prevent freezing on startup
 
     try:
-        # --- FIXED: Use 'async for' instead of 'await' ---
         async for msg in client.get_chat_history(FORWARDER_SOURCE_ID, limit=MAX_FETCH):
             processed_count += 1
 
