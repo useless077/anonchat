@@ -404,7 +404,6 @@ async def menu_end_cb(client, query):
 async def next_cmd(client, message):
     user_id = message.from_user.id
     partner_id = sessions.pop(user_id, None)
-https://www.instagram.com/p/DUnBKj_EkEZ/?igsh=MXJveHBjcThmM2o3eQ==
     if partner_id:
         # --- DELETE CONNECTION MESSAGE FOR BOTH ---
         # User 1's connection message
