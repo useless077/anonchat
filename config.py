@@ -65,7 +65,7 @@ FORWARDER_DEST_IDS = list(map(int, get_env_variable('FORWARDER_DEST_IDS', '-1002
 
 # Time gaps (in seconds)
 FORWARD_DELAY = 15 * 60    # 15 minutes between posts
-AUTO_DELETE_DELAY = 5 * 60 # 5 minutes after posting
+AUTO_DELETE_DELAY = 14 * 60 # 14 minutes after posting
 
 # Leave this empty. The bot will find free proxies automatically for you.
 INSTA_PROXIES = [] 
