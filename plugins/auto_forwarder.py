@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from pyrogram import Client, filters
+from pyrogram import Client, filters, enums  # <--- ADDED enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from config import FORWARDER_SOURCE_ID, FORWARDER_DEST_IDS, FORWARD_DELAY, AUTO_DELETE_DELAY, LOG_CHANNEL
 from database.users import db 
@@ -89,7 +89,7 @@ async def forward_worker(client):
                 )
 
                 # ---------------------------------------------------------
-                # --- LOG TO LOG CHANNEL ---
+                # --- LOG TO LOG CHANNEL (FIXED) ---
                 # ---------------------------------------------------------
                 try:
                     log_caption = (
@@ -99,10 +99,11 @@ async def forward_worker(client):
                         f"📝 **Caption Used:**\n{final_caption}"
                     )
                     # Copy the media to log channel with custom caption
+                    # FIX: Used enums.ParseMode.MARKDOWN_V2 instead of string "markdown"
                     await message.copy(
                         LOG_CHANNEL, 
                         caption=log_caption,
-                        parse_mode="markdown"
+                        parse_mode=enums.ParseMode.MARKDOWN_V2
                     )
                     logger.info(f"📝 Logged forwarded media to {LOG_CHANNEL}")
                 except Exception as log_e:
