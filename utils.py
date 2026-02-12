@@ -16,7 +16,7 @@ chat_timers = {}      # user_id -> datetime of last message
 waiting_users = set() # Move waiting_users here to avoid circular import
 
 # Constants
-IDLE_CHAT_LIMIT = 15 * 60  # 15 min
+IDLE_CHAT_LIMIT = 30 * 60  # 30 min
 PROFILE_TIMEOUT = 5 * 60   # 5 min
 AUTO_DELETE_DELAY = 3600   # 1 hour
 SEARCH_TIMEOUT = 120       # 2 minutes
@@ -76,21 +76,51 @@ async def start_profile_timer(user_id: int, send_message):
     profile_timers[user_id] = task
 
 async def check_idle_chats(send_message):
-    """Loop to disconnect users after idle time."""
+# ----------------- Timers -----------------
+# ... (keep start_profile_timer as is) ...
+
+async def check_idle_chats(client: Client):
+    """
+    Loop to disconnect users after 30 minutes of inactivity.
+    This task must be started in main.py using asyncio.create_task.
+    """
+    print("[IDLE CHECKER] Started 30-minute idle chat checker...")
     while True:
         now = datetime.utcnow()
         to_remove = []
+        
+        # Check all active chats
         for user_id, last_active in list(chat_timers.items()):
             if (now - last_active).total_seconds() > IDLE_CHAT_LIMIT:
                 partner_id = sessions.get(user_id)
+                
                 if partner_id:
-                    await send_message(user_id, "⚠️ Chat closed due to inactivity.")
-                    await send_message(partner_id, "⚠️ Chat closed due to inactivity.")
+                    print(f"[IDLE CHECKER] Closing idle chat between {user_id} and {partner_id}")
+                    
+                    try:
+                        # 1. Notify both users
+                        await client.send_message(user_id, "⚠️ **Chat closed due to 30 minutes of inactivity.**")
+                        await client.send_message(partner_id, "⚠️ **Chat closed due to 30 minutes of inactivity.**")
+                    except Exception as e:
+                        print(f"[IDLE CHECKER] Failed to notify user: {e}")
+
+                    # 2. Cleanup Database
+                    try:
+                        await db.reset_partners(user_id, partner_id)
+                        await db.update_status(user_id, "idle")
+                        await db.update_status(partner_id, "idle")
+                    except Exception as e:
+                        print(f"[IDLE CHECKER] Failed to update DB: {e}")
+
+                    # 3. Mark for removal from utils state
                     to_remove.append(user_id)
                     to_remove.append(partner_id)
+        
+        # 4. Cleanup Utils State
         for u in set(to_remove):
             remove_user(u)
-        await asyncio.sleep(60)
+            
+        await asyncio.sleep(60) # Check every minute
 
 # ----------------- Search Functions (UPDATED) -----------------
 async def send_search_progress(client, user_id: int, message_obj: Message):
