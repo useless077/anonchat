@@ -1,5 +1,3 @@
-# utils.py
-
 import random
 import asyncio
 import hashlib  # Required for duplicate check logic
@@ -75,10 +73,7 @@ async def start_profile_timer(user_id: int, send_message):
     task = asyncio.create_task(timeout())
     profile_timers[user_id] = task
 
-async def check_idle_chats(send_message):
-# ----------------- Timers -----------------
-# ... (keep start_profile_timer as is) ...
-
+# ----------------- IDLE CHAT CHECKER -----------------
 async def check_idle_chats(client: Client):
     """
     Loop to disconnect users after 30 minutes of inactivity.
@@ -122,7 +117,7 @@ async def check_idle_chats(client: Client):
             
         await asyncio.sleep(60) # Check every minute
 
-# ----------------- Search Functions (UPDATED) -----------------
+# ----------------- Search Functions -----------------
 async def send_search_progress(client, user_id: int, message_obj: Message):
     """
     Updates the search message with a countdown timer instead of sending new messages.
