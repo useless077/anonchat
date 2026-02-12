@@ -1,5 +1,3 @@
-# main.py
-
 import logging
 import sys
 import asyncio
@@ -12,7 +10,7 @@ from utils import check_idle_chats, safe_reply
 
 # ✅ IMPORTS FOR AUTO FORWARDER
 from plugins.ai import load_ai_state, start_greeting_task
-from plugins.auto_forwarder import catch_up_history, forward_worker # <--- NEW IMPORT
+from plugins.auto_forwarder import catch_up_history, forward_worker
 from utils import load_autodelete_state 
 
 # Configure logging
@@ -68,14 +66,15 @@ class Bot(Client):
             logging.info("Starting AI greeting scheduler...")
             asyncio.create_task(start_greeting_task(self))
             
-            # --- Start Idle Chat Checker ---
+            # --- Start Idle Chat Checker (FIXED) ---
             logging.info("Starting idle chat checker...")
-            asyncio.create_task(check_idle_chats(lambda uid, text="⚠️ Chat closed due to inactivity.": safe_reply(bot.get_users(uid), text)))
+            # ✅ FIXED: Passing 'self' (the bot instance) to the checker
+            asyncio.create_task(check_idle_chats(self))
             
             # --- ✅ NEW: Start Auto Forwarder ---
             # 1. First, check history and fill queue with old videos
-           # logging.info("Starting Auto Forwarder History Check...")
-           # asyncio.create_task(catch_up_history(self))
+            # logging.info("Starting Auto Forwarder History Check...")
+            # asyncio.create_task(catch_up_history(self))
 
             # 2. Then, start the worker that posts videos every 15 mins
             logging.info("Starting Auto Forwarder Worker...")
@@ -83,9 +82,9 @@ class Bot(Client):
             # ------------------------------------
             
         except Exception as e:
-            logging.error(f"Failed to start the bot: {e}")
+            logging.error(f"Failed to start bot: {e}")
             try:
-                await self.send_message(LOG_CHANNEL, f"Failed to start the bot: {e}")
+                await self.send_message(LOG_CHANNEL, f"Failed to start bot: {e}")
             except Exception as send_error:
                 logging.error(f"Failed to send error message to log channel: {send_error}")
             sys.exit(1)
@@ -97,9 +96,9 @@ class Bot(Client):
             logging.info("Bot Stopped 🙄")
             await self.send_message(LOG_CHANNEL, "Bot Stopped 🙄")
         except Exception as e:
-            logging.error(f"Failed to stop the bot: {e}")
+            logging.error(f"Failed to stop bot: {e}")
             try:
-                await self.send_message(LOG_CHANNEL, f"Failed to stop the bot: {e}")
+                await self.send_message(LOG_CHANNEL, f"Failed to stop bot: {e}")
             except Exception as send_error:
                 logging.error(f"Failed to send stop message to log channel: {send_error}")
 
