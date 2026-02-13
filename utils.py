@@ -253,6 +253,30 @@ async def safe_reply(message: Message, text: str, **kwargs):
     return sent
 
 # ----------------- Utility Functions -----------------
+
+# --- NEW: Bot Permissions Helper ---
+async def check_bot_permissions(client: Client, chat_id: int) -> bool:
+    """
+    Checks if the bot has 'invite_users' and 'delete_messages' permissions 
+    in the specific chat.
+    """
+    try:
+        # Get the bot's own member object
+        me = await client.get_me()
+        member = await client.get_chat_member(chat_id, me.id)
+
+        # Check if bot is Admin or Owner
+        if member.status in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER):
+            # Access privileges
+            priv = member.privileges
+            # Check specifically for Invite and Delete permissions
+            if priv and priv.can_invite_users and priv.can_delete_messages:
+                return True
+    except Exception as e:
+        print(f"[PERMISSIONS] Error checking rights for {chat_id}: {e}")
+    
+    return False
+
 def get_online_users_count(minutes: int = 5) -> int:
     """
     Returns the count of users active in the last 'x' minutes.
