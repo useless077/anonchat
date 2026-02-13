@@ -1,4 +1,3 @@
-# plugins/extra.py
 import asyncio
 from datetime import datetime
 from pyrogram import Client, filters, enums
@@ -89,7 +88,6 @@ async def toggle_autodelete(client: Client, message: Message):
     try:
         bot_member = await client.get_chat_member(message.chat.id, client.me.id)
         if not bot_member.privileges or not getattr(bot_member.privileges, "can_delete_messages", False):
-            # REQUESTED MESSAGE: "hey idiot first give me delete permission then use this function"
             return await message.reply("Hey idiot, first give me **Delete Messages** permission then use this function! 🤬")
     except Exception:
         return await message.reply("⚠️ I couldn't check my own permissions.")
@@ -113,7 +111,6 @@ async def toggle_autodelete(client: Client, message: Message):
 
 
 # --- GLOBAL AUTO DELETE HANDLER ---
-# This catches ALL media (Bot's and User's) in groups where autodelete is ON
 @Client.on_message(
     filters.group & (
         filters.photo | 
@@ -127,27 +124,18 @@ async def toggle_autodelete(client: Client, message: Message):
     group=2
 )
 async def auto_delete_group_media(client: Client, message: Message):
-    """
-    Delete media messages (including Bot's own media) after 1 hour 
-    if autodelete is enabled for the group.
-    """
     chat_id = message.chat.id
-
-    # Check if this group has AutoDelete enabled
     if chat_id not in autodelete_enabled_chats:
         return
 
-    print(f"[AUTODELETE] Scheduling deletion of message {message.id} (Type: {message.media}) in chat {chat_id}")
-    
-    # Schedule deletion in the background (Non-blocking)
+    print(f"[AUTODELETE] Scheduling deletion of message {message.id} in chat {chat_id}")
     asyncio.create_task(schedule_deletion(client, chat_id, [message.id], delay=AUTO_DELETE_DELAY))
 
 
 # ==========================================================
-#  AGGRESSIVE ANTI-SPAM SYSTEM
+#  AGGRESSIVE ANTI-SPAM SYSTEM (FIXED LOGGING)
 # ==========================================================
 
-# Regex to catch: Links, Channel Invites, and Bot Usernames (@SomethingBot)
 SPAM_PATTERN = r'(https?://\S+|t\.me/\S+|telegram\.me/\S+|@\w+bot)'
 
 @Client.on_message(
@@ -155,7 +143,8 @@ SPAM_PATTERN = r'(https?://\S+|t\.me/\S+|telegram\.me/\S+|@\w+bot)'
     filters.text & 
     filters.regex(SPAM_PATTERN) & 
     ~filters.user(ADMIN_IDS) & 
-    ~filters.command(["ai", "autodelete", "start", "search", "next", "end", "myprofile", "profile", "cancel", "broadcast", "status"])
+    ~filters.command(["ai", "autodelete", "start", "search", "next", "end", "myprofile", "profile", "cancel", "broadcast", "status"]),
+    group=3 # Moved to group 3 to avoid conflict
 )
 async def anti_spam_delete(client: Client, message: Message):
     """
@@ -165,16 +154,24 @@ async def anti_spam_delete(client: Client, message: Message):
         chat_id = message.chat.id
         user_id = message.from_user.id
 
-        # Double check if user is an Admin in this specific group
+        # Check if user is Group Admin
         member = await client.get_chat_member(chat_id, user_id)
         if member.status in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER):
-            return # Allow admins to post links
+            return 
 
-        # --- SPAM CHECK 1: Links & Bot Usernames ---
-        # If the regex above caught it, delete immediately.
-        await message.delete()
-        await _log_spam(client, user_id, message, "Link or Bot Username")
-        return
+        reason = "Link or Bot Username"
+        delete_status = "✅ Deleted"
+
+        # Attempt to delete
+        try:
+            await message.delete()
+        except Exception as e:
+            delete_status = f"❌ Failed to delete (Error: {e})"
+            # Print to console for debugging
+            print(f"[ANTI_SPAM] {delete_status}")
+
+        # Always log, even if delete failed
+        await _log_spam(client, user_id, message, reason, delete_status)
 
     except Exception as e:
         print(f"[ANTI_SPAM] Error: {e}")
@@ -184,7 +181,8 @@ async def anti_spam_delete(client: Client, message: Message):
     filters.group & 
     filters.text & 
     ~filters.user(ADMIN_IDS) & 
-    ~filters.command(["ai", "autodelete", "start", "search", "next", "end", "myprofile", "profile", "cancel", "broadcast", "status"])
+    ~filters.command(["ai", "autodelete", "start", "search", "next", "end", "myprofile", "profile", "cancel", "broadcast", "status"]),
+    group=3 # Same group as regex handler
 )
 async def anti_spam_heavy(client: Client, message: Message):
     """
@@ -194,7 +192,7 @@ async def anti_spam_heavy(client: Client, message: Message):
         chat_id = message.chat.id
         user_id = message.from_user.id
 
-        # Check if user is an Admin
+        # Check if user is Group Admin
         member = await client.get_chat_member(chat_id, user_id)
         if member.status in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER):
             return 
@@ -203,35 +201,41 @@ async def anti_spam_heavy(client: Client, message: Message):
         reason = None
 
         # --- SPAM CHECK 2: Long Messages (Copy-Paste Spam) ---
-        if len(text) > 300: # If message is longer than 300 chars
+        if len(text) > 300:
             reason = "Too Long Message"
 
         # --- SPAM CHECK 3: Forwarded from Channel (Ads) ---
-        # Note: We don't block forwarded from *users*, only *channels* (forward_from_chat)
+        # NOTE: This might fail if the user has 'Hide Forward From' enabled
         elif message.forward_from_chat:
             reason = "Forwarded from Channel"
 
         if reason:
-            await message.delete()
-            await _log_spam(client, user_id, message, reason)
-            return
+            delete_status = "✅ Deleted"
+            
+            try:
+                await message.delete()
+            except Exception as e:
+                delete_status = f"❌ Failed to delete (Error: {e})"
+                print(f"[ANTI_SPAM HEAVY] {delete_status}")
+
+            await _log_spam(client, user_id, message, reason, delete_status)
 
     except Exception as e:
         print(f"[ANTI_SPAM HEAVY] Error: {e}")
 
 
-async def _log_spam(client: Client, user_id: int, message: Message, reason: str):
+async def _log_spam(client: Client, user_id: int, message: Message, reason: str, action_status: str):
     """Helper to log deletion."""
     try:
-        # Get a snippet of the message
         text_snippet = (message.text or message.caption or "")[:50]
         
         log_text = (
-            f"🚫 **Auto-Deleted Spam**\n\n"
+            f"🚫 **Spam Detected**\n\n"
             f"👤 **User:** <a href='tg://user?id={user_id}'>{message.from_user.first_name}</a>\n"
             f"🆔 **User ID:** `{user_id}`\n"
             f"💬 **Group:** `{message.chat.title}`\n"
             f"⚠️ **Reason:** {reason}\n"
+            f"⚙️ **Action:** {action_status}\n"
             f"📝 **Snippet:** `{text_snippet}...`"
         )
         await client.send_message(config.LOG_CHANNEL, log_text, parse_mode=enums.ParseMode.HTML)
