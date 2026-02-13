@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from pyrogram import Client, filters, enums  # <--- ADDED enums
+from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from config import FORWARDER_SOURCE_ID, FORWARDER_DEST_IDS, FORWARD_DELAY, AUTO_DELETE_DELAY, LOG_CHANNEL
 from database.users import db 
@@ -33,7 +33,8 @@ def to_small_caps(text):
 # Define your custom caption text here
 CUSTOM_CAPTION_TEXT = (
     "Just and me in your group for more videos\n\n"
-    "Start me and get your partner now 😜❤️"
+    "Start me and get your partner now 😜❤️\n\n"
+    "Join now guys @XtamilChat" 
 )
 
 async def delete_after_delay(client, chat_id, message_ids, delay):
