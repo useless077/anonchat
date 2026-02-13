@@ -1,7 +1,9 @@
 import asyncio
 import logging
 from pyrogram import Client, filters, enums
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ChatType
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+# FIX: ChatType is now in enums in Pyrogram v2
+from pyrogram.enums import ChatType
 from config import FORWARDER_SOURCE_ID, FORWARD_DELAY, AUTO_DELETE_DELAY, LOG_CHANNEL
 from database.users import db 
 from utils import check_bot_permissions  # <--- IMPORT THE NEW FUNCTION
