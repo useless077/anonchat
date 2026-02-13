@@ -1,12 +1,10 @@
 import asyncio
 import logging
 from pyrogram import Client, filters, enums
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-# FIX: ChatType is now in enums in Pyrogram v2
-from pyrogram.enums import ChatType
-from config import FORWARDER_SOURCE_ID, FORWARD_DELAY, AUTO_DELETE_DELAY, LOG_CHANNEL
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ChatType
+from config import FORWARDER_SOURCE_ID, FORWARDER_DEST_IDS, FORWARD_DELAY, AUTO_DELETE_DELAY, LOG_CHANNEL
 from database.users import db 
-from utils import check_bot_permissions  # <--- IMPORT THE NEW FUNCTION
+from utils import check_bot_permissions  # <--- IMPORT THE PERMISSION CHECKER
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -79,55 +77,59 @@ async def forward_worker(client):
         ])
 
         # ---------------------------------------------------------
-        # --- DYNAMIC GROUP SCANNING & PERMISSION CHECK ---
+        # --- DYNAMIC PERMISSION CHECK USING CONFIG LIST ---
         # ---------------------------------------------------------
         
         posted_count = 0
         warning_sent_count = 0
         
-        # Iterate through all dialogs (Chats/Groups)
-        async for dialog in client.get_dialogs():
-            chat = dialog.chat
+        # FIX: Iterate through FORWARDER_DEST_IDS from config.py
+        # We do NOT use client.get_dialogs() because Bots cannot use that method.
+        for chat_id in FORWARDER_DEST_IDS:
             
-            # Only process Groups and Supergroups (Ignore Private chats and Channels)
-            if chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
-                
-                # Check permissions using our new utils function
-                has_permissions = await check_bot_permissions(client, chat.id)
-                
-                if has_permissions:
-                    try:
-                        # Post Video with Spoiler
-                        sent_msg = await message.copy(
-                            chat_id=chat.id, 
-                            caption=final_caption, 
-                            reply_markup=reply_markup,
-                            has_spoiler=True 
-                        )
-                        
-                        logger.info(f"✅ Sent to {chat.title} ({chat.id}). Scheduling delete...")
-                        posted_count += 1
-                        
-                        # Schedule deletion
-                        asyncio.create_task(
-                            delete_after_delay(client, chat.id, sent_msg.id, AUTO_DELETE_DELAY)
-                        )
+            # Get Chat Title for logging
+            try:
+                chat_info = await client.get_chat(chat_id)
+                chat_title = chat_info.title
+            except Exception:
+                chat_title = str(chat_id)
 
-                    except Exception as e:
-                        logger.error(f"❌ Failed to send to {chat.title}: {e}")
-                
-                else:
-                    # Bot is in the group but LACKS permissions
-                    try:
-                        warning_text = (
-                            "Hola @admin I need invite users and delete permission to post videos here. "
-                            "You really missed the videos"
-                        )
-                        await client.send_message(chat.id, warning_text)
-                        logger.info(f"⚠️ Sent permission warning to {chat.title}")
-                        warning_sent_count += 1
-                    except Exception as e:
-                        logger.error(f"❌ Could not send warning to {chat.title}: {e}")
+            # Check permissions using our new utils function
+            has_permissions = await check_bot_permissions(client, chat_id)
+            
+            if has_permissions:
+                try:
+                    # Post Video with Spoiler
+                    sent_msg = await message.copy(
+                        chat_id=chat_id, 
+                        caption=final_caption, 
+                        reply_markup=reply_markup,
+                        has_spoiler=True 
+                    )
+                    
+                    logger.info(f"✅ Sent to {chat_title} ({chat_id}). Scheduling delete...")
+                    posted_count += 1
+                    
+                    # Schedule deletion
+                    asyncio.create_task(
+                        delete_after_delay(client, chat_id, sent_msg.id, AUTO_DELETE_DELAY)
+                    )
+
+                except Exception as e:
+                    logger.error(f"❌ Failed to send to {chat_title}: {e}")
+            
+            else:
+                # Bot is in the group but LACKS permissions
+                try:
+                    warning_text = (
+                        "Hola @admin I need invite users and delete permission to post videos here. "
+                        "You really missed the videos"
+                    )
+                    await client.send_message(chat_id, warning_text)
+                    logger.info(f"⚠️ Sent permission warning to {chat_title}")
+                    warning_sent_count += 1
+                except Exception as e:
+                    logger.error(f"❌ Could not send warning to {chat_title}: {e}")
 
         # ---------------------------------------------------------
 
