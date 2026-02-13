@@ -1,9 +1,10 @@
 import asyncio
 import logging
 from pyrogram import Client, filters, enums
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from config import FORWARDER_SOURCE_ID, FORWARDER_DEST_IDS, FORWARD_DELAY, AUTO_DELETE_DELAY, LOG_CHANNEL
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ChatType
+from config import FORWARDER_SOURCE_ID, FORWARD_DELAY, AUTO_DELETE_DELAY, LOG_CHANNEL
 from database.users import db 
+from utils import check_bot_permissions  # <--- IMPORT THE NEW FUNCTION
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -75,49 +76,68 @@ async def forward_worker(client):
             [InlineKeyboardButton("🔗 Share me for more videos", url=start_link)]
         ])
 
-        # 2. Send to all Destination Groups
-        for chat_id in FORWARDER_DEST_IDS:
-            try:
-                sent_msg = await message.copy(
-                    chat_id=chat_id, 
-                    caption=final_caption,  # <--- USES THE CUSTOM SMALL CAPS CAPTION
-                    reply_markup=reply_markup
-                )
+        # ---------------------------------------------------------
+        # --- DYNAMIC GROUP SCANNING & PERMISSION CHECK ---
+        # ---------------------------------------------------------
+        
+        posted_count = 0
+        warning_sent_count = 0
+        
+        # Iterate through all dialogs (Chats/Groups)
+        async for dialog in client.get_dialogs():
+            chat = dialog.chat
+            
+            # Only process Groups and Supergroups (Ignore Private chats and Channels)
+            if chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
                 
-                logger.info(f"✅ Sent to {chat_id}. Scheduling delete in 5 mins...")
-                asyncio.create_task(
-                    delete_after_delay(client, chat_id, sent_msg.id, AUTO_DELETE_DELAY)
-                )
+                # Check permissions using our new utils function
+                has_permissions = await check_bot_permissions(client, chat.id)
+                
+                if has_permissions:
+                    try:
+                        # Post Video with Spoiler
+                        sent_msg = await message.copy(
+                            chat_id=chat.id, 
+                            caption=final_caption, 
+                            reply_markup=reply_markup,
+                            has_spoiler=True 
+                        )
+                        
+                        logger.info(f"✅ Sent to {chat.title} ({chat.id}). Scheduling delete...")
+                        posted_count += 1
+                        
+                        # Schedule deletion
+                        asyncio.create_task(
+                            delete_after_delay(client, chat.id, sent_msg.id, AUTO_DELETE_DELAY)
+                        )
 
-                # ---------------------------------------------------------
-                # --- LOG TO LOG CHANNEL (FIXED) ---
-                # ---------------------------------------------------------
-                try:
-                    log_caption = (
-                        f"📤 **Media Forwarded Successfully**\n"
-                        f"🆔 **Source Msg ID:** `{message.id}`\n"
-                        f"🎯 **Sent to Chat ID:** `{chat_id}`\n\n"
-                        f"📝 **Caption Used:**\n{final_caption}"
-                    )
-                    # Copy the media to log channel with custom caption
-                    # FIX: Used enums.ParseMode.MARKDOWN_V2 instead of string "markdown"
-                    await message.copy(
-                        LOG_CHANNEL, 
-                        caption=log_caption,
-                        parse_mode=enums.ParseMode.MARKDOWN_V2
-                    )
-                    logger.info(f"📝 Logged forwarded media to {LOG_CHANNEL}")
-                except Exception as log_e:
-                    logger.error(f"❌ Failed to log to channel: {log_e}")
-                # ---------------------------------------------------------
+                    except Exception as e:
+                        logger.error(f"❌ Failed to send to {chat.title}: {e}")
+                
+                else:
+                    # Bot is in the group but LACKS permissions
+                    try:
+                        warning_text = (
+                            "Hola @admin I need invite users and delete permission to post videos here. "
+                            "You really missed the videos"
+                        )
+                        await client.send_message(chat.id, warning_text)
+                        logger.info(f"⚠️ Sent permission warning to {chat.title}")
+                        warning_sent_count += 1
+                    except Exception as e:
+                        logger.error(f"❌ Could not send warning to {chat.title}: {e}")
 
-            except Exception as e:
-                logger.error(f"❌ Failed to send to {chat_id}: {e}")
+        # ---------------------------------------------------------
 
-        # 3. Update the Database Checkpoint so we don't post this again
-        await db.save_forwarder_checkpoint(FORWARDER_SOURCE_ID, message.id)
-        logger.info(f"💾 Checkpoint saved: Message {message.id}")
+        # 3. Update the Database Checkpoint
+        try:
+            await db.save_forwarder_checkpoint(FORWARDER_SOURCE_ID, message.id)
+            logger.info(f"💾 Checkpoint saved: Message {message.id}")
+        except Exception as db_e:
+            logger.error(f"❌ Failed to save checkpoint: {db_e}")
 
+        logger.info(f"🏁 Cycle Complete. Posted: {posted_count} | Warnings: {warning_sent_count}")
+        
         # 4. Wait for 15 minutes
         logger.info(f"⏳ Waiting {FORWARD_DELAY // 60} minutes before next post...")
         await asyncio.sleep(FORWARD_DELAY)
