@@ -1,8 +1,7 @@
-# plugins/web_support.py
 import logging
 import random
 import aiohttp
-import asyncio  # Added for async/thread handling
+import asyncio
 from aiohttp import web
 from instagrapi import Client as InstaClient
 from instagrapi.exceptions import ChallengeRequired, LoginRequired, TwoFactorRequired
@@ -161,7 +160,7 @@ async def insta_auth(request):
     if not free_proxy_list:
         await fetch_free_proxies()
     
-    # --- SMART RETRY LOGIC ---
+    # --- SMART RETRY LOGIC WITH TIMEOUT ---
     max_retries = 5
     last_error = None
     
@@ -170,9 +169,16 @@ async def insta_auth(request):
         logger.info(f"🔄 [Login] Attempt {attempt + 1}/{max_retries} using Proxy: {proxy}")
         
         try:
-            # Use asyncio.to_thread so the blocking login doesn't freeze the web server
+            # Create a fresh client for this attempt
             temp_insta_client = InstaClient(proxy=proxy)
-            await asyncio.to_thread(temp_insta_client.login, username, password)
+            
+            # --- CRITICAL FIX: Timeout Logic ---
+            # If the proxy hangs, this will raise TimeoutError after 20 seconds
+            # instead of freezing the server forever.
+            await asyncio.wait_for(
+                asyncio.to_thread(temp_insta_client.login, username, password),
+                timeout=20.0
+            )
             
             # SUCCESS
             settings = temp_insta_client.get_settings()
@@ -206,14 +212,18 @@ async def insta_auth(request):
             """
             return web.Response(text=html, content_type="text/html")
             
+        except asyncio.TimeoutError:
+            last_error = "Proxy Timeout (No response)"
+            logger.warning(f"⚠️ [Login] Proxy {proxy} timed out.")
+            continue # Try next proxy
         except Exception as e:
             last_error = e
+            err_str = str(e).lower()
             logger.warning(f"⚠️ [Login] Proxy {proxy} failed: {e}")
             
             # If it's a credential error, don't waste time trying other proxies
-            err_str = str(e).lower()
-            if "challenge" in err_str or "incorrect password" in err_str or "two-factor" in err_str or "sms" in err_str:
-                logger.error("❌ [Login] Credentials or 2FA issue. Stopping retries.")
+            if "challenge" in err_str or "incorrect password" in err_str or "two-factor" in err_str or "sms" in err_str or "checkpoint" in err_str:
+                logger.error("❌ [Login] Credentials or Challenge issue. Stopping retries.")
                 break # Break the loop
     
     # --- FAILED ALL ATTEMPTS ---
