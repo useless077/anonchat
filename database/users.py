@@ -201,18 +201,26 @@ class Database:
 
     # ===================== FORWARDER CHECKPOINT ======================
 
-    async def get_forwarder_checkpoint(self, source_id: int) -> int:
-        doc = await self.forwarder_checkpoint.find_one({"source_id": source_id})
-        if doc:
-            return doc.get("last_id", 0)
-        return 0
+    async def get_forwarder_checkpoint(self, source_id):
+        """Get the last index processed for a source channel."""
+        try:
+            data = await self.col.find_one({"_id": "forwarder_checkpoint"})
+            if data:
+                return data.get(str(source_id), 0)
+            return 0
+        except Exception:
+            return 0
 
-    async def save_forwarder_checkpoint(self, source_id: int, message_id: int):
-        await self.forwarder_checkpoint.update_one(
-            {"source_id": source_id},
-            {"$set": {"last_id": message_id}},
-            upsert=True
-        )
+    async def save_forwarder_checkpoint(self, source_id, index):
+        """Save the last index processed for a source channel."""
+        try:
+            await self.col.update_one(
+                {"_id": "forwarder_checkpoint"},
+                {"$set": {str(source_id): index}},
+                upsert=True
+            )
+        except Exception as e:
+            print(f"[DB] Failed to save checkpoint: {e}")
 
 
 # ------------------- Shared Instance -------------------
