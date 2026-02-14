@@ -306,68 +306,7 @@ async def admin_ai_cb(client, query):
 
 # ----------------- ADMIN MESSAGE HANDLERS -----------------
 
-@Client.on_message(filters.private & filters.text & filters.user(config.OWNER_ID))
-async def handle_admin_text_input(client, message):
-    """Handles text inputs for Broadcast and AI Toggle."""
-    user_id = message.from_user.id
-    text = message.text
-
-    # 1. Handle Cancel
-    if text == "/cancel":
-        if user_id in broadcast_states: del broadcast_states[user_id]
-        if user_id in ai_manage_states: del ai_manage_states[user_id]
-        await message.reply("❌ Cancelled.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_panel")]]))
-        return
-
-    # 2. Handle Broadcast
-    if user_id in broadcast_states:
-        del broadcast_states[user_id]
-        
-        await message.reply("📤 **Broadcasting...** This may take a while.")
-        
-        users = await db.get_all_users() # Ensure you have this function in db
-        success = 0
-        failed = 0
-        
-        for user in users:
-            try:
-                # user is usually a dict, assuming 'id' or '_id' is the key
-                uid = user.get('_id') or user.get('id')
-                if not uid: continue
-                
-                await client.send_message(uid, text)
-                success += 1
-                await asyncio.sleep(0.1) # Small delay to avoid flood
-            except Exception:
-                failed += 1
-                
-        await message.reply(f"✅ **Broadcast Complete!**\n\n✅ Sent: `{success}`\n❌ Failed: `{failed}`", parse_mode="markdown")
-        return
-
-    # 3. Handle AI Toggle
-    if user_id in ai_manage_states:
-        del ai_manage_states[user_id]
-        
-        try:
-            group_id = int(text.strip())
-        except ValueError:
-            return await message.reply("❌ Invalid Group ID. Please send a numeric ID (e.g., -1001234567890).")
-        
-        try:
-            # Toggle logic
-            if group_id in ai_enabled_groups:
-                ai_enabled_groups.remove(group_id)
-                await message.reply(f"🤖 **AI Disabled** in group `{group_id}`")
-            else:
-                ai_enabled_groups.add(group_id)
-                await message.reply(f"🤖 **AI Enabled** in group `{group_id}`")
-                
-            # Note: If you want this to persist after restart, you must save this to DB
-            # await db.update_ai_group(group_id, status=True/False)
-            
-        except Exception as e:
-            await message.reply(f"❌ Error: {e}")
-        return
+@
 
 @Client.on_callback_query(filters.regex("^back_to_start$"))
 async def back_to_start_cb(client, query):
