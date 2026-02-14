@@ -10,7 +10,7 @@ from utils import check_idle_chats, safe_reply
 
 # ✅ IMPORTS FOR AUTO FORWARDER
 from plugins.ai import load_ai_state, start_greeting_task
-from plugins.auto_forwarder import catch_up_history, forward_worker
+from plugins.auto_forwarder import forward_worker
 from utils import load_autodelete_state 
 
 # Configure logging
@@ -78,7 +78,7 @@ class Bot(Client):
 
             # 2. Then, start the worker that posts videos every 15 mins
             logging.info("Starting Auto Forwarder Worker...")
-            asyncio.create_task(forward_worker(self))
+         #   asyncio.create_task(forward_worker(self))
             # ------------------------------------
             
         except Exception as e:
