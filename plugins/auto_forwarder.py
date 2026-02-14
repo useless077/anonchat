@@ -6,7 +6,7 @@ import json
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 # REMOVED: ChatType (Not needed anymore as we use config list)
-from config import FORWARDER_SOURCE_ID, FORWARDER_DEST_IDS, FORWARD_DELAY, AUTO_DELETE_DELAY, LOG_CHANNEL
+from config import FORWARDER_SOURCE_ID, FORWARDER_DEST_IDS, FORWARD_DELAY, AUTO_DELETE_DELAY, LOG_CHANNEL, ADMIN_IDS
 from database.users import db 
 from utils import check_bot_permissions
 
