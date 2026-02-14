@@ -56,25 +56,36 @@ CUSTOM_CAPTION_TEXT = (
 # VIDEO LIST FETCH
 # ================================
 
-async def get_video_list(client: Client):
-    if os.path.exists(CACHE_FILE):
+# --- REPLACE get_video_list with this version ---
+async def get_video_list(client: Client, force_refresh=False):
+    if os.path.exists(CACHE_FILE) and not force_refresh:
         try:
             with open(CACHE_FILE, "r") as f:
-                return json.load(f)
-        except:
-            pass
+                data = json.load(f)
+                if data: 
+                    return data
+        except Exception:
+            pass # Fall through to fetch if cache is corrupt
 
-    logger.info("📥 Fetching videos from source channel...")
-
+    logger.info("📥 Fetching videos from source channel... (This might take a moment)")
     video_ids = []
-    async for msg in client.get_chat_history(FORWARDER_SOURCE_ID, limit=10000):
-        if msg.photo or msg.video:
-            video_ids.append(msg.id)
+    
+    try:
+        # Fetch history
+        async for msg in client.get_chat_history(FORWARDER_SOURCE_ID, limit=200): # Reduced limit for speed
+            if msg.photo or msg.video:
+                video_ids.append(msg.id)
+    except Exception as e:
+        logger.error(f"Error fetching history: {e}")
+        return []
 
     video_ids.reverse()
 
-    with open(CACHE_FILE, "w") as f:
-        json.dump(video_ids, f)
+    try:
+        with open(CACHE_FILE, "w") as f:
+            json.dump(video_ids, f)
+    except Exception as e:
+        logger.warning(f"Could not write cache file: {e}")
 
     logger.info(f"✅ Cached {len(video_ids)} videos")
     return video_ids
@@ -220,11 +231,15 @@ async def catch_media(client, message):
 # ADMIN STATUS COMMAND
 # ================================
 
+# --- REPLACE file_status with this version ---
 @Client.on_message(filters.command("fstatus") & filters.user(ADMIN_IDS))
 async def file_status(client: Client, message: Message):
-
-    video_ids = await get_video_list(client)
+    # Use force_refresh=False so it uses the cache (instant reply)
+    video_ids = await get_video_list(client, force_refresh=False)
     total = len(video_ids)
+
+    if total == 0:
+        return await message.reply("❌ No videos found in cache. Check Source ID.")
 
     current_index = await db.get_forwarder_checkpoint(FORWARDER_SOURCE_ID)
     pending = post_queue.qsize()
@@ -233,10 +248,18 @@ async def file_status(client: Client, message: Message):
 
     text = (
         f"🔄 **Forwarder Status**\n\n"
-        f"📂 Total Videos: `{total}`\n"
+        f"📂 Total Videos (Cached): `{total}`\n"
         f"📍 Current Index: `{current_index}`\n"
         f"📊 Progress: `{percent:.2f}%`\n"
-        f"🔴 Live Queue: `{pending}`"
+        f"🔴 Live Queue: `{pending}`\n\n"
+        f"💡 Use `/refresh_cache` to update video list from channel."
     )
 
-    await message.reply(text)
+    await message.reply(text, parse_mode="markdown")
+
+# Optional: Add a command to force refresh the cache
+@Client.on_message(filters.command("refresh_cache") & filters.user(ADMIN_IDS))
+async def refresh_cache_cmd(client, message):
+    msg = await message.reply("🔄 Refreshing video list... please wait.")
+    await get_video_list(client, force_refresh=True)
+    await msg.edit("✅ Cache Refreshed!")
