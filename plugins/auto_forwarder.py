@@ -262,3 +262,66 @@ async def catch_media(client, message):
         logger.error(f"Error processing live media group: {e}")
         if media_group_id in processed_media_groups:
             processed_media_groups.remove(media_group_id)
+
+@Client.on_message(filters.command("file_status") & filters.user(ADMIN_IDS))
+async def loop_status_cmd(client: Client, message: Message):
+    """
+    Checks how many files are in the bot's list and the current progress.
+    """
+    status_msg = await message.reply("📊 Calculating loop status...")
+
+    # Define filenames (Must match the ones defined at the top of the file)
+    CACHE_FILE = "video_list_cache.json"
+    INDEX_FILE = "last_index.txt"
+
+    total_files = 0
+    current_index = 0
+    is_cached = False
+
+    # 1. Read Total Files from Cache
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, 'r') as f:
+                data = json.load(f)
+                total_files = len(data)
+                is_cached = True
+        except Exception as e:
+            await status_msg.edit(f"❌ Error reading cache: {e}")
+            return
+    else:
+        return await status_msg.edit("⚠️ **Cache file not found.**\nThe bot is still fetching the video list on startup. Please wait.")
+
+    # 2. Read Current Position
+    if os.path.exists(INDEX_FILE):
+        try:
+            with open(INDEX_FILE, 'r') as f:
+                current_index = int(f.read())
+        except:
+            pass
+
+    # 3. Check Live Queue (Videos waiting to be posted)
+    # Note: post_queue is defined in this same file
+    pending_queue = post_queue.qsize()
+
+    # 4. Calculate Stats
+    if current_index > total_files:
+        # Reset display if loop restarted
+        current_index = 0
+        
+    remaining = total_files - current_index
+    if total_files > 0:
+        percent = (current_index / total_files) * 100
+    else:
+        percent = 0
+
+    # 5. Send Report
+    report_text = (
+        f"🔄 **Bot Loop Status**\n\n"
+        f"📂 **Total Files Found:** `{total_files}`\n"
+        f"📍 **Current Position:** `{current_index}`\n"
+        f"📊 **Progress:** `{percent:.2f}%` completed\n"
+        f"⏳ **Remaining in List:** `{remaining}`\n\n"
+        f"🔴 **Live Queue:** `{pending_queue}` videos waiting (Priority)."
+    )
+
+    await status_msg.edit(report_text)
