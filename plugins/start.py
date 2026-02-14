@@ -306,8 +306,6 @@ async def admin_ai_cb(client, query):
 
 # ----------------- ADMIN MESSAGE HANDLERS -----------------
 
-@
-
 @Client.on_callback_query(filters.regex("^back_to_start$"))
 async def back_to_start_cb(client, query):
     """Handles the 'Back' button."""
