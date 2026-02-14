@@ -1,287 +1,260 @@
 # plugins/social_post.py
+
 import os
 import asyncio
 import logging
 import secrets
 import random
-from typing import List, Optional
+import uuid
+from typing import List
 
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from instagrapi import Client as InstaClient
-from instagrapi.exceptions import LoginRequired, ChallengeRequired, PrivateError, MediaNotFound
+from instagrapi.exceptions import (
+    LoginRequired,
+    ChallengeRequired,
+    PrivateError,
+    MediaNotFound,
+)
 
-# --- IMPORT YOUR SHARED DB INSTANCE ---
 from database.users import db
-
-# --- IMPORT CONFIG VALUES ---
 from config import ADMIN_IDS, WEBHOOK, MONGO_DB_NAME, INSTA_PROXIES
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- Instagram client setup ---
+# ---------------- Instagram Client ----------------
 insta_client = InstaClient()
 
-# After imports, before the client setup
+
 def get_random_proxy():
-    """Helper to pick a random proxy."""
     if INSTA_PROXIES:
         return random.choice(INSTA_PROXIES)
     return None
 
-# --- Session Management (using your Database class) ---
+
+# ---------------- Session Management ----------------
 async def load_insta_session() -> bool:
-    """Load Instagram session settings from MongoDB using the shared db instance."""
-    logger.info(f"🔍 Checking for Instagram session in database '{MONGO_DB_NAME}'...")
+    logger.info(f"🔍 Checking Instagram session in DB '{MONGO_DB_NAME}'...")
     session_doc = await db.get_insta_session(MONGO_DB_NAME)
-    
+
     if session_doc and "settings" in session_doc:
         try:
-            # --- CHANGE STARTS HERE ---
-            # 1. Pick a random proxy
             proxy = get_random_proxy()
-            logger.info(f"🌐 [SocialPost] Using proxy: {proxy}")
+            logger.info(f"🌐 Using proxy: {proxy}")
 
-            # 2. Use 'global' to modify the client used by the upload function
-            global insta_client 
-            
-            # 3. Initialize client with the proxy
+            global insta_client
             insta_client = InstaClient(proxy=proxy)
-            # --- CHANGE ENDS HERE ---
 
             insta_client.set_settings(session_doc["settings"])
-            
-            # Check if the loaded session is valid by trying to get user info
-            # (This request now goes through the proxy)
-            user_info = await asyncio.to_thread(insta_client.user_info, insta_client.user_id)
-            logger.info(f"✅ Logged in as {user_info.username} from MongoDB session.")
+
+            # Verify session
+            await asyncio.to_thread(insta_client.account_info)
+
+            logger.info("✅ Instagram session loaded successfully.")
             return True
-            
+
         except Exception as e:
-            logger.error(f"❌ Invalid or expired session in DB: {e}")
-            # Clean up the invalid session from DB
+            logger.error(f"❌ Invalid session: {e}")
             await db.delete_insta_session(MONGO_DB_NAME)
             return False
-            
-    logger.info("ℹ️ No session found in MongoDB.")
+
+    logger.info("ℹ️ No Instagram session found.")
     return False
 
+
 async def save_insta_session_to_db():
-    """Save current Instagram client settings to MongoDB using the shared db instance."""
-    logger.info(f"💾 Saving Instagram session to database '{MONGO_DB_NAME}'...")
     try:
         settings = insta_client.get_settings()
-        # Using MONGO_DB_NAME as the unique session identifier
         await db.save_insta_session(MONGO_DB_NAME, settings)
-        logger.info("✅ Session saved successfully to MongoDB.")
+        logger.info("✅ Session saved to MongoDB.")
     except Exception as e:
-        logger.error(f"❌ Failed to save session to DB: {e}")
+        logger.error(f"❌ Failed saving session: {e}")
 
-# --- In-memory token store for secure login ---
-# In a real app, this should be in Redis or a DB with an expiry
+
+# ---------------- Secure Login Token ----------------
 login_tokens = {}
 
-# --- Commands ---
+
 @Client.on_message(filters.command("insta_login") & filters.user(ADMIN_IDS))
 async def insta_login(client: Client, message: Message):
-    """Generates a secure, one-time login link."""
-    # Generate a secure token
     token = secrets.token_urlsafe(16)
-    login_tokens[token] = True  # Store the token
-    
-    # Create the login URL with the token
-    # Your web server at WEBHOOK must handle this token
-    login_url = f"{WEBHOOK}insta_login?token={token}"
-    
-    await message.reply(
-        f"🌐 Click below to log in to Instagram.\n\n"
-        f"**This link is valid for a single use and expires in 5 minutes.**\n\n"
-        f"[Login to Instagram]({login_url})",
-        disable_web_page_preview=True
-    )
-    # Optional: Schedule token deletion after 5 minutes
-    await asyncio.sleep(300)
-    if token in login_tokens:
-        del login_tokens[token]
+    login_tokens[token] = True
 
+    login_url = f"{WEBHOOK}insta_login?token={token}"
+
+    await message.reply(
+        f"🌐 Login to Instagram\n\n"
+        f"⚠️ Valid for 5 minutes.\n\n"
+        f"[Login Here]({login_url})",
+        disable_web_page_preview=True,
+    )
+
+    await asyncio.sleep(300)
+    login_tokens.pop(token, None)
+
+
+# ---------------- Instagram Post Command ----------------
 @Client.on_message(filters.command(["insta_post", "insta_reel", "insta_photo"]) & filters.user(ADMIN_IDS))
 async def insta_post(client: Client, message: Message):
-    """Handles posting photos, videos, and carousels to Instagram."""
-    
-    # 1. Check Instagram session
+
     if not await load_insta_session():
-        await message.reply("⚠️ Not logged in. Please run `/insta_login` first.")
+        await message.reply("⚠️ Not logged in. Run `/insta_login` first.")
         return
 
-    # 2. Check for reply to a message
     replied_msg = message.reply_to_message
     if not replied_msg:
-        await message.reply("❌ Reply to a Telegram media (photo/video) to post.")
+        await message.reply("❌ Reply to a photo/video.")
         return
 
-    # 3. Determine command and media type
     command = message.command[0]
     is_reel = command == "insta_reel"
-    is_photo_post = command == "insta_photo"
-    
-    file_paths: List[str] = []
-    media_group = None
-    
-    # 4. Handle multiple media (Carousel)
+    is_photo_only = command == "insta_photo"
+
+    media_group = []
+
     if replied_msg.media_group_id:
-        await message.reply("📦 Detected a media group. Downloading all items...")
         try:
-            # Fetch all messages in the media group
-            media_group = await client.get_media_group(replied_msg.chat.id, replied_msg.id)
+            media_group = await client.get_media_group(
+                replied_msg.chat.id, replied_msg.id
+            )
         except Exception as e:
-            logger.error(f"Failed to get media group: {e}")
-            await message.reply("❌ Could not fetch all media items. Please try again.")
+            logger.error(e)
+            await message.reply("❌ Failed to fetch media group.")
             return
     else:
         media_group = [replied_msg]
 
-    # 5. Download files and validate types
+    file_paths: List[str] = []
+
     for msg in media_group:
         if msg.photo or msg.video:
             path = await msg.download()
             if path:
                 file_paths.append(path)
-        else:
-            # Silently skip non-photo/video items in a group
-            logger.warning(f"Skipping a non-photo/video item in the group: {msg.id}")
 
     if not file_paths:
-        await message.reply("❌ No valid photos or videos found to post.")
+        await message.reply("❌ No valid media found.")
         return
 
-    # 6. Validate command vs media type
     if is_reel and not any(msg.video for msg in media_group):
-        await message.reply("❌ Reels can only be created from videos. Use `/insta_photo` for photos.")
-        return
-    
-    if is_photo_post and any(msg.video for msg in media_group):
-        await message.reply("❌ `/insta_photo` is for photos only. Found a video. Use `/insta_post` or `/insta_reel`.")
+        await message.reply("❌ Reels require a video.")
         return
 
-    # 7. Caption selection logic
-    caption_parts = [part for part in message.command[1:] if not part.startswith("--")]
-    cmd_caption = " ".join(caption_parts).strip()
-    media_caption = (replied_msg.caption or "").strip()
-    default_caption = "📸 𝐟𝐨𝐥𝐥𝐨𝐰 𝐟𝐨𝐫 𝐦𝐨𝐫𝐞 𝐢𝐧𝐭𝐞𝐫𝐞𝐬𝐭𝐢𝐧𝐠 𝐯𝐢𝐝𝐞𝐨𝐬. 𝐝𝐨𝐧'𝐭 𝐟𝐨𝐫𝐠𝐞𝐭 𝐭𝐨 𝐬𝐡𝐚𝐫𝐞 𝐨𝐮𝐫 𝐩𝐨𝐬𝐭.. #tamilreels #tamilaunty #tamilactresses #hotreels #trendingsong #viral" if is_photo_post else "𝐟𝐨𝐥𝐥𝐨𝐰 𝐟𝐨𝐫 𝐦𝐨𝐫𝐞 𝐢𝐧𝐭𝐞𝐫𝐞𝐬𝐭𝐢𝐧𝐠 𝐩𝐡𝐨𝐭𝐨𝐬 𝐚𝐧𝐝 𝐦𝐞𝐦𝐞𝐬. 𝐝𝐨𝐧'𝐭 𝐟𝐨𝐫𝐠𝐞𝐭 𝐭𝐨 𝐬𝐡𝐚𝐫𝐞 𝐨𝐮𝐫 𝐩𝐨𝐬𝐭.. #tamilmemes #tamilaunty #tamilactresses #trendingsong #viral"
-    caption = cmd_caption or media_caption or default_caption
-    
-    post_type = "Reel" if is_reel else ("Carousel" if len(file_paths) > 1 else ("Photo" if file_paths[0].lower().endswith(('.jpg', '.jpeg', '.png')) else "Video"))
-    await message.reply(f"📤 Uploading {len(file_paths)} item(s) to Instagram {post_type}...")
+    if is_photo_only and any(msg.video for msg in media_group):
+        await message.reply("❌ `/insta_photo` is for images only.")
+        return
 
-    # 8. Upload to Instagram in a separate thread to avoid blocking the bot
+    caption = (
+        " ".join(message.command[1:]).strip()
+        or replied_msg.caption
+        or "Follow for more updates 🔥"
+    )
+
+    await message.reply("📤 Uploading to Instagram...")
+
     try:
-        media = await asyncio.to_thread(
-            lambda: (
-                # For Reels, only use the first video
-                insta_client.clip_upload(file_paths[0], caption=caption) if is_reel
-                # For Photo posts or if all files are images, use photo_upload (handles carousel)
-                else insta_client.photo_upload(file_paths, caption=caption) if is_photo_post or all(p.lower().endswith(('.jpg', '.jpeg', '.png')) for p in file_paths)
-                # For general video posts
-                else insta_client.video_upload(file_paths, caption=caption)
+        # ---------------- Upload Logic ----------------
+        if is_reel:
+            media = await asyncio.to_thread(
+                insta_client.clip_upload,
+                file_paths[0],
+                caption
             )
-        )
 
-        # 9. Handle success
+        elif len(file_paths) > 1:
+            media = await asyncio.to_thread(
+                insta_client.album_upload,
+                file_paths,
+                caption
+            )
+
+        elif file_paths[0].lower().endswith((".jpg", ".jpeg", ".png")):
+            media = await asyncio.to_thread(
+                insta_client.photo_upload,
+                file_paths[0],
+                caption
+            )
+
+        else:
+            media = await asyncio.to_thread(
+                insta_client.video_upload,
+                file_paths[0],
+                caption
+            )
+
+        # ---------------- Success ----------------
         if media and hasattr(media, "code"):
             post_url = f"https://www.instagram.com/p/{media.code}/"
             await message.reply(
-                f"✅ Uploaded successfully to Instagram {post_type}!\n\n📝 Caption:\n{caption}\n\n 𝗳𝗼𝗹𝗹𝗼𝘄 𝗳𝗼𝗿 𝗺𝗼𝗿𝗲 𝗶𝗻𝘁𝗲𝗿𝗲𝘀𝘁𝗶𝗻𝗴 𝘃𝗶𝗱𝗲𝗼𝘀 𝗮𝗻𝗱 𝗽𝗵𝗼𝘁𝗼𝘀😘😍💕🥵🔗 {post_url}"
+                f"✅ Uploaded Successfully!\n\n🔗 {post_url}"
             )
         else:
-            await message.reply(f"✅ Uploaded successfully to Instagram {post_type}! (Link unavailable)")
+            await message.reply("✅ Uploaded Successfully!")
 
     except LoginRequired:
-        await message.reply("❌ Instagram session expired. Please run `/insta_login` again.")
-        # Use MONGO_DB_NAME to delete the invalid session
+        await message.reply("❌ Session expired. Login again.")
         await db.delete_insta_session(MONGO_DB_NAME)
+
     except ChallengeRequired:
-        await message.reply("❌ Instagram requires a challenge (e.g., verify email/code). Please log in manually via `/insta_login`.")
+        await message.reply("❌ Instagram challenge required.")
+
     except MediaNotFound:
-        await message.reply("❌ Instagram could not process the media. It might be corrupted or in an unsupported format.")
+        await message.reply("❌ Invalid or corrupted media.")
+
     except Exception as e:
-        logger.error(f"Instagram upload failed: {e}")
+        logger.error(e)
         await message.reply(f"❌ Upload failed: {e}")
+
     finally:
-        # 10. Clean up downloaded files
         for path in file_paths:
             if os.path.exists(path):
                 os.remove(path)
 
-# --- NEW COMMAND: Import Session from Chrome ---
+
+# ---------------- Import Session from Chrome ----------------
 @Client.on_message(filters.command("import_session") & filters.user(ADMIN_IDS))
 async def import_session_cmd(client: Client, message: Message):
-    """Import a valid sessionid from Chrome to bypass IP blocks."""
-    
-    # 1. Get the sessionid from the command
-    # Example: /import_session 3984759283745928374:1A2B3C...
+
     if len(message.command) < 2:
         await message.reply(
-            "❌ **Usage:** `/import_session <your_sessionid>`\n\n"
-            "👉 **How to get Session ID:**\n"
-            "1. Login to Instagram on Chrome.\n"
-            "2. Press F12 -> Application -> Cookies -> Instagram.\n"
-            "3. Copy the value of `sessionid`.\n"
-            "4. Paste it here."
+            "Usage:\n`/import_session <sessionid>`"
         )
         return
 
     session_id = message.command[1]
+
     await message.reply("⏳ Verifying session...")
 
     try:
-        # 2. Create a temporary client and inject the cookie
         temp_client = InstaClient()
-        
-        # Construct the settings dictionary with just the sessionid
-        # We set 'uuid' to a random one to prevent device mismatch errors
-        import uuid
-        device_id = str(uuid.uuid4())
-        
+
         settings = {
-            "cookies": [
-                {
-                    "name": "sessionid",
-                    "value": session_id,
-                    "domain": ".instagram.com",
-                    "path": "/",
-                    "expires": None,
-                    "secure": True,
-                    "httponly": False,
-                    "SameSite": "Lax"
-                }
-            ],
+            "cookies": {
+                "sessionid": session_id
+            },
             "device_settings": {
-                "uuid": device_id,
+                "uuid": str(uuid.uuid4()),
                 "manufacturer": "Xiaomi",
                 "model": "Mi 9T",
                 "android_version": 28,
-                "android_release": "9.0"
+                "android_release": "9.0",
             },
-            "user_agent": "Instagram 219.0.0.12.117 Android"
+            "user_agent": "Instagram 219.0.0.12.117 Android",
         }
-        
+
         temp_client.set_settings(settings)
-        
-        # 3. Verify the session by fetching user info
-        user_info = temp_client.user_info_from_username("instagram") # Check official account to verify
-        
-        # 4. If successful, save to DB
+
+        # Verify login
+        temp_client.account_info()
+
         await db.save_insta_session(MONGO_DB_NAME, settings)
-        
+
         await message.reply(
-            f"✅ **Session Imported Successfully!**\n\n"
-            f"Logged in as user: **{temp_client.user_id}**\n"
-            f"You can now use `/insta_post` commands."
+            "✅ Session Imported Successfully!\nYou can now use `/insta_post`."
         )
-        logger.info(f"✅ [SessionImport] User imported session via Chrome.")
 
     except Exception as e:
-        logger.error(f"❌ [SessionImport] Failed: {e}")
-        await message.reply(f"❌ **Invalid Session ID.**\n\nMake sure you copied the `sessionid` correctly from Chrome. \n\nError: {e}")
-
+        logger.error(e)
+        await message.reply(f"❌ Invalid session.\nError: {e}")
