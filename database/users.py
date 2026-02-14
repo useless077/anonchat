@@ -199,6 +199,23 @@ class Database:
             upsert=True
         )
 
+# ------------------- Forwarder Checkpoint -------------------
+
+async def get_forwarder_checkpoint(self, source_id: int) -> int:
+    """Get the last processed index for a source channel."""
+    doc = await self.forwarder_checkpoint.find_one({"source_id": source_id})
+    if doc:
+        return doc.get("last_index", 0)
+    return 0
+
+async def save_forwarder_checkpoint(self, source_id: int, index: int):
+    """Save current index for source channel."""
+    await self.forwarder_checkpoint.update_one(
+        {"source_id": source_id},
+        {"$set": {"last_index": index}},
+        upsert=True
+    )
+
 
 # ------------------- Shared instance -------------------
 db = Database(MONGO_URI, MONGO_DB_NAME)
