@@ -53,11 +53,11 @@ CUSTOM_CAPTION_TEXT = (
 )
 
 # ================================
-# VIDEO LIST FETCH
+# VIDEO LIST FETCH (ROBUST VERSION)
 # ================================
 
 async def get_video_list(client: Client, force_refresh=False):
-    # 1. Try to use existing cache if available and not forcing refresh
+    # 1. Try to use existing cache
     if os.path.exists(CACHE_FILE) and not force_refresh:
         try:
             with open(CACHE_FILE, "r") as f:
@@ -68,22 +68,34 @@ async def get_video_list(client: Client, force_refresh=False):
         except Exception:
             pass 
 
-    logger.info("📥 Attempting to fetch videos from source channel...")
+    # 2. Verify Connection FIRST before fetching history
+    logger.info(f"🔍 Verifying access to Source: {FORWARDER_SOURCE_ID}")
+    try:
+        # Just get one message to see if we can talk to the channel
+        await client.get_messages(FORWARDER_SOURCE_ID, 1)
+    except Exception as e:
+        logger.error(f"❌ CRITICAL: Cannot access source channel!")
+        logger.error(f"🔴 Error: {e}")
+        logger.error(f"💡 FIX: In config.py, change FORWARDER_SOURCE_ID to the channel USERNAME (e.g. @ChannelName)")
+        return [] # Return empty to switch to live mode
+
+    # 3. Fetch History
+    logger.info("📥 Fetching videos from history...")
     video_ids = []
     
     try:
-        # Note: Bot MUST be Admin in source channel for this to work
-        async for msg in client.get_chat_history(FORWARDER_SOURCE_ID, limit=300):
+        # Fetch history. Bot MUST be admin for this.
+        async for msg in client.get_chat_history(FORWARDER_SOURCE_ID, limit=500):
             if msg.photo or msg.video:
                 video_ids.append(msg.id)
     except Exception as e:
-        logger.error(f"⚠️ Could not fetch history (Bot might not be Admin in source): {e}")
-        logger.warning("⚠️ Switching to Live-Only mode.")
+        logger.error(f"⚠️ Error fetching history: {e}")
         return []
 
-    # Reverse so index 0 is the oldest video (1st video)
+    # Reverse so index 0 is the oldest video
     video_ids.reverse()
 
+    # Save to cache
     try:
         with open(CACHE_FILE, "w") as f:
             json.dump(video_ids, f)
@@ -107,7 +119,7 @@ async def delete_after_delay(client, chat_id, message_id):
 
 
 # ================================
-# MAIN WORKER
+# MAIN WORKER (LOGIC FIXED)
 # ================================
 
 async def forward_worker(client: Client):
@@ -123,7 +135,7 @@ async def forward_worker(client: Client):
         [InlineKeyboardButton("🔗 Share me for more videos", url=start_link)]
     ])
 
-    # Fetch history list (returns [] if bot not admin)
+    # Fetch history list
     video_ids = await get_video_list(client)
 
     # Load the last saved position
@@ -143,7 +155,7 @@ async def forward_worker(client: Client):
 
         # ================= HISTORY =================
         if not msg_obj:
-            # If we have no history data, just wait for live posts
+            # If no history data (or permission denied), just wait for live
             if not video_ids:
                 await asyncio.sleep(2)
                 continue
@@ -200,7 +212,8 @@ async def forward_worker(client: Client):
                     logger.info(f"🗑 Removed dead group {chat_id}")
 
         # ================= UPDATE INDEX =================
-        # Only increment if it was a history video
+        # ONLY increment if it was a history video.
+        # Live videos do NOT advance the history counter.
         if not is_live:
             current_index += 1
             await db.save_forwarder_checkpoint(FORWARDER_SOURCE_ID, current_index)
@@ -243,7 +256,6 @@ async def catch_media(client, message):
 
 @Client.on_message(filters.command("fstatus") & filters.user(ADMIN_IDS))
 async def file_status(client: Client, message: Message):
-    # Force refresh=False to use cache for speed
     video_ids = await get_video_list(client, force_refresh=False)
     total = len(video_ids)
 
@@ -258,18 +270,16 @@ async def file_status(client: Client, message: Message):
         f"📍 Current Index: `{current_index}`\n"
         f"📊 Progress: `{percent:.2f}%`\n"
         f"🔴 Live Queue: `{pending}`\n\n"
-        f"💡 If total is 0, make the bot an **Admin** in the source channel."
+        f"💡 If total is 0, check config.py ID or Bot Admin status."
     )
 
-    # FIXED: Use enums.ParseMode.MARKDOWN instead of string "markdown"
+    # FIXED: Use enums.ParseMode.MARKDOWN
     await message.reply(text, parse_mode=enums.ParseMode.MARKDOWN)
 
 @Client.on_message(filters.command("refresh_cache") & filters.user(ADMIN_IDS))
 async def refresh_cache_cmd(client, message):
     msg = await message.reply("🔄 Refreshing video list... please wait.")
     await get_video_list(client, force_refresh=True)
-    
-    # FIXED: Wrap edit in try-except to avoid MessageNotModified error
     try:
         await msg.edit("✅ Cache Refreshed!")
     except Exception:
