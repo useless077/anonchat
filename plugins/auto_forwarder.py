@@ -56,29 +56,32 @@ CUSTOM_CAPTION_TEXT = (
 # VIDEO LIST FETCH
 # ================================
 
-# --- REPLACE get_video_list with this version ---
 async def get_video_list(client: Client, force_refresh=False):
+    # 1. Try to use existing cache if available and not forcing refresh
     if os.path.exists(CACHE_FILE) and not force_refresh:
         try:
             with open(CACHE_FILE, "r") as f:
                 data = json.load(f)
                 if data: 
+                    logger.info("📂 Using cached video list.")
                     return data
         except Exception:
             pass # Fall through to fetch if cache is corrupt
 
-    logger.info("📥 Fetching videos from source channel... (This might take a moment)")
+    logger.info("📥 Attempting to fetch videos from source channel...")
     video_ids = []
     
     try:
-        # Fetch history
-        async for msg in client.get_chat_history(FORWARDER_SOURCE_ID, limit=200): # Reduced limit for speed
+        # Note: Bot MUST be Admin in source channel for this to work
+        async for msg in client.get_chat_history(FORWARDER_SOURCE_ID, limit=300):
             if msg.photo or msg.video:
                 video_ids.append(msg.id)
     except Exception as e:
-        logger.error(f"Error fetching history: {e}")
+        logger.error(f"⚠️ Could not fetch history (Bot might not be Admin in source): {e}")
+        logger.warning("⚠️ Switching to Live-Only mode.")
         return []
 
+    # Reverse so index 0 is the oldest video (1st video)
     video_ids.reverse()
 
     try:
@@ -87,7 +90,7 @@ async def get_video_list(client: Client, force_refresh=False):
     except Exception as e:
         logger.warning(f"Could not write cache file: {e}")
 
-    logger.info(f"✅ Cached {len(video_ids)} videos")
+    logger.info(f"✅ Successfully cached {len(video_ids)} videos.")
     return video_ids
 
 
@@ -108,7 +111,6 @@ async def delete_after_delay(client, chat_id, message_id):
 # ================================
 
 async def forward_worker(client: Client):
-
     logger.info("🚀 Forward Worker Started")
 
     me = await client.get_me()
@@ -121,40 +123,47 @@ async def forward_worker(client: Client):
         [InlineKeyboardButton("🔗 Share me for more videos", url=start_link)]
     ])
 
+    # Fetch history list (returns [] if bot not admin)
     video_ids = await get_video_list(client)
 
-    if not video_ids:
-        logger.error("❌ No videos found in source.")
-        return
-
+    # Load the last saved position
     current_index = await db.get_forwarder_checkpoint(FORWARDER_SOURCE_ID)
 
     while True:
-
         msg_obj = None
         is_live = False
 
         # ================= LIVE PRIORITY =================
+        # We check for new posts first. Timeout is 1 second.
         try:
             msg_obj = await asyncio.wait_for(post_queue.get(), timeout=1.0)
             is_live = True
-            logger.info(f"🔴 LIVE Video {msg_obj.id}")
+            logger.info(f"🔴 [LIVE] Forwarding video ID: {msg_obj.id}")
         except asyncio.TimeoutError:
             pass
 
         # ================= HISTORY =================
         if not msg_obj:
+            # If we have no history data (bot not admin), just wait for live posts
+            if not video_ids:
+                await asyncio.sleep(2)
+                continue
+
+            # Cycle Logic: If we reached the end, reset to 0 (1st video)
             if current_index >= len(video_ids):
+                logger.info("🔄 End of history reached. Restarting from 1st video.")
                 current_index = 0
 
             msg_id = video_ids[current_index]
 
             try:
                 msg_obj = await client.get_messages(FORWARDER_SOURCE_ID, msg_id)
-                logger.info(f"🟡 HISTORY {current_index+1}/{len(video_ids)}")
+                logger.info(f"🟡 [HISTORY] Forwarding index {current_index+1}/{len(video_ids)}")
             except Exception as e:
                 logger.error(f"❌ Fetch failed: {e}")
+                # Skip this broken video
                 current_index += 1
+                await db.save_forwarder_checkpoint(FORWARDER_SOURCE_ID, current_index)
                 continue
 
         if not msg_obj:
@@ -193,9 +202,13 @@ async def forward_worker(client: Client):
                     logger.info(f"🗑 Removed dead group {chat_id}")
 
         # ================= UPDATE INDEX =================
+        # ONLY increment history index if we just processed a history video.
+        # If it was a LIVE video, we keep the index where it was so we resume later.
         if not is_live:
             current_index += 1
             await db.save_forwarder_checkpoint(FORWARDER_SOURCE_ID, current_index)
+        else:
+            logger.info("⏸️ History paused due to Live video. Will resume later.")
 
         logger.info(f"⏳ Sleeping {FORWARD_DELAY} seconds")
         await asyncio.sleep(FORWARD_DELAY)
@@ -231,15 +244,11 @@ async def catch_media(client, message):
 # ADMIN STATUS COMMAND
 # ================================
 
-# --- REPLACE file_status with this version ---
 @Client.on_message(filters.command("fstatus") & filters.user(ADMIN_IDS))
 async def file_status(client: Client, message: Message):
-    # Use force_refresh=False so it uses the cache (instant reply)
+    # Force refresh=False to use cache for speed
     video_ids = await get_video_list(client, force_refresh=False)
     total = len(video_ids)
-
-    if total == 0:
-        return await message.reply("❌ No videos found in cache. Check Source ID.")
 
     current_index = await db.get_forwarder_checkpoint(FORWARDER_SOURCE_ID)
     pending = post_queue.qsize()
@@ -252,12 +261,11 @@ async def file_status(client: Client, message: Message):
         f"📍 Current Index: `{current_index}`\n"
         f"📊 Progress: `{percent:.2f}%`\n"
         f"🔴 Live Queue: `{pending}`\n\n"
-        f"💡 Use `/refresh_cache` to update video list from channel."
+        f"💡 If total is 0, make the bot an **Admin** in the source channel."
     )
 
     await message.reply(text, parse_mode="markdown")
 
-# Optional: Add a command to force refresh the cache
 @Client.on_message(filters.command("refresh_cache") & filters.user(ADMIN_IDS))
 async def refresh_cache_cmd(client, message):
     msg = await message.reply("🔄 Refreshing video list... please wait.")
