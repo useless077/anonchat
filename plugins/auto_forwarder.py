@@ -3,7 +3,7 @@ import logging
 import os
 import re
 import json
-from pyrogram import Client, filters
+from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from config import FORWARDER_SOURCE_ID, FORWARD_DELAY, AUTO_DELETE_DELAY, ADMIN_IDS
 from database.users import db
@@ -66,7 +66,7 @@ async def get_video_list(client: Client, force_refresh=False):
                     logger.info("📂 Using cached video list.")
                     return data
         except Exception:
-            pass # Fall through to fetch if cache is corrupt
+            pass 
 
     logger.info("📥 Attempting to fetch videos from source channel...")
     video_ids = []
@@ -134,7 +134,6 @@ async def forward_worker(client: Client):
         is_live = False
 
         # ================= LIVE PRIORITY =================
-        # We check for new posts first. Timeout is 1 second.
         try:
             msg_obj = await asyncio.wait_for(post_queue.get(), timeout=1.0)
             is_live = True
@@ -144,12 +143,12 @@ async def forward_worker(client: Client):
 
         # ================= HISTORY =================
         if not msg_obj:
-            # If we have no history data (bot not admin), just wait for live posts
+            # If we have no history data, just wait for live posts
             if not video_ids:
                 await asyncio.sleep(2)
                 continue
 
-            # Cycle Logic: If we reached the end, reset to 0 (1st video)
+            # Cycle Logic: Restart from 0 if end reached
             if current_index >= len(video_ids):
                 logger.info("🔄 End of history reached. Restarting from 1st video.")
                 current_index = 0
@@ -196,19 +195,17 @@ async def forward_worker(client: Client):
                 error_text = str(e).upper()
                 logger.error(f"❌ Send failed {chat_id}: {error_text}")
 
-                # Remove dead groups automatically
                 if "CHAT_WRITE_FORBIDDEN" in error_text or "PEER_ID_INVALID" in error_text:
                     await db.remove_group(chat_id)
                     logger.info(f"🗑 Removed dead group {chat_id}")
 
         # ================= UPDATE INDEX =================
-        # ONLY increment history index if we just processed a history video.
-        # If it was a LIVE video, we keep the index where it was so we resume later.
+        # Only increment if it was a history video
         if not is_live:
             current_index += 1
             await db.save_forwarder_checkpoint(FORWARDER_SOURCE_ID, current_index)
         else:
-            logger.info("⏸️ History paused due to Live video. Will resume later.")
+            logger.info("⏸️ History paused due to Live video.")
 
         logger.info(f"⏳ Sleeping {FORWARD_DELAY} seconds")
         await asyncio.sleep(FORWARD_DELAY)
@@ -264,10 +261,16 @@ async def file_status(client: Client, message: Message):
         f"💡 If total is 0, make the bot an **Admin** in the source channel."
     )
 
-    await message.reply(text, parse_mode="markdown")
+    # FIXED: Use enums.ParseMode.MARKDOWN instead of string "markdown"
+    await message.reply(text, parse_mode=enums.ParseMode.MARKDOWN)
 
 @Client.on_message(filters.command("refresh_cache") & filters.user(ADMIN_IDS))
 async def refresh_cache_cmd(client, message):
     msg = await message.reply("🔄 Refreshing video list... please wait.")
     await get_video_list(client, force_refresh=True)
-    await msg.edit("✅ Cache Refreshed!")
+    
+    # FIXED: Wrap edit in try-except to avoid MessageNotModified error
+    try:
+        await msg.edit("✅ Cache Refreshed!")
+    except Exception:
+        pass
