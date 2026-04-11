@@ -1,10 +1,11 @@
 import re
 import asyncio
 import logging
+# Ensure we import Pyrogram Client, not anything else
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
 from config import ADMIN_IDS
-from database.users import db  # Import DB
+from database.users import db
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,7 @@ async def index_handler(client: Client, message: Message):
 
     # 3. Start Indexing
     status_msg = await message.reply(f"🔄 **Starting Index...**\nSource: `{chat_id}`\nFrom ID: `{last_msg_id}`")
+    # Pass the Pyrogram client explicitly
     await run_indexing(client, status_msg, chat_id, last_msg_id)
 
 
@@ -66,25 +68,23 @@ async def cancel_index_cmd(client: Client, message: Message):
     await message.reply("🛑 **Indexing Cancelled.**")
 
 
-async def run_indexing(client: Client, status_msg: Message, chat_id, start_id):
+async def run_indexing(pyro_client: Client, status_msg: Message, chat_id, start_id):
     """Main loop to fetch and save video IDs to MongoDB."""
     global INDEX_CANCEL
     INDEX_CANCEL = False
     
     async with INDEX_LOCK:
         # Load existing IDs from MongoDB to prevent duplicates
-        # We use the chat_id from the link/forward as the key
         video_ids = await db.get_video_list_db(chat_id)
-        
-        # Convert to set for fast lookup (optimization)
         existing_ids_set = set(video_ids)
         
         count = 0
         skipped = 0
         
-        # Iterate backwards from the starting message
+        # Use get_chat_history instead of iter_messages to be safer
         try:
-            async for msg in client.iter_messages(chat_id, offset_id=start_id, reverse=False):
+            # Iterate backwards from the starting message
+            async for msg in pyro_client.get_chat_history(chat_id, offset_id=start_id, reverse=False):
                 
                 if INDEX_CANCEL:
                     await status_msg.edit(f"🛑 **Cancelled.**\nNew Indexed: `{count}`")
@@ -92,9 +92,7 @@ async def run_indexing(client: Client, status_msg: Message, chat_id, start_id):
 
                 if msg.photo or msg.video:
                     if msg.id not in existing_ids_set:
-                        # Add to set
                         existing_ids_set.add(msg.id)
-                        # Add to list
                         video_ids.append(msg.id)
                         count += 1
                     else:
@@ -102,8 +100,6 @@ async def run_indexing(client: Client, status_msg: Message, chat_id, start_id):
 
                 # Update UI every 20 messages
                 if count % 20 == 0 and count > 0:
-                    # Note: We do NOT save to DB here yet to save writes.
-                    # We save at the end.
                     await status_msg.edit(
                         f"📥 **Indexing...**\n"
                         f"New Found: `{count}`\n"
@@ -117,12 +113,11 @@ async def run_indexing(client: Client, status_msg: Message, chat_id, start_id):
 
         # Final Save to MongoDB
         try:
-            # Save the list (sorted oldest to newest for the forwarder)
+            # Sort: Oldest first for the forwarder
             video_ids.reverse()
             await db.save_video_list_db(chat_id, video_ids)
             
             # Reset the forwarder checkpoint for THIS specific channel
-            # This ensures if the forwarder is set to this channel, it starts from the beginning
             await db.save_forwarder_checkpoint(chat_id, 0)
             
             await status_msg.edit(
