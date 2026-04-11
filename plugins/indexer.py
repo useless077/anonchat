@@ -1,15 +1,12 @@
 import re
-import os
-import json
 import asyncio
 import logging
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
-from config import ADMIN_IDS, FORWARDER_SOURCE_ID
-from database.users import db
+from config import ADMIN_IDS
+from database.users import db  # Import DB
 
 logger = logging.getLogger(__name__)
-CACHE_FILE = "video_list_cache.json"
 
 # Global State
 INDEX_LOCK = asyncio.Lock()
@@ -70,20 +67,18 @@ async def cancel_index_cmd(client: Client, message: Message):
 
 
 async def run_indexing(client: Client, status_msg: Message, chat_id, start_id):
-    """Main loop to fetch and save video IDs."""
+    """Main loop to fetch and save video IDs to MongoDB."""
     global INDEX_CANCEL
     INDEX_CANCEL = False
     
     async with INDEX_LOCK:
-        # Load existing IDs to prevent duplicates
-        video_ids = []
-        if os.path.exists(CACHE_FILE):
-            try:
-                with open(CACHE_FILE, "r") as f:
-                    video_ids = json.load(f)
-            except:
-                pass
-
+        # Load existing IDs from MongoDB to prevent duplicates
+        # We use the chat_id from the link/forward as the key
+        video_ids = await db.get_video_list_db(chat_id)
+        
+        # Convert to set for fast lookup (optimization)
+        existing_ids_set = set(video_ids)
+        
         count = 0
         skipped = 0
         
@@ -92,11 +87,14 @@ async def run_indexing(client: Client, status_msg: Message, chat_id, start_id):
             async for msg in client.iter_messages(chat_id, offset_id=start_id, reverse=False):
                 
                 if INDEX_CANCEL:
-                    await status_msg.edit(f"🛑 **Cancelled.**\nSaved: `{count}`")
+                    await status_msg.edit(f"🛑 **Cancelled.**\nNew Indexed: `{count}`")
                     return
 
                 if msg.photo or msg.video:
-                    if msg.id not in video_ids:
+                    if msg.id not in existing_ids_set:
+                        # Add to set
+                        existing_ids_set.add(msg.id)
+                        # Add to list
                         video_ids.append(msg.id)
                         count += 1
                     else:
@@ -104,37 +102,35 @@ async def run_indexing(client: Client, status_msg: Message, chat_id, start_id):
 
                 # Update UI every 20 messages
                 if count % 20 == 0 and count > 0:
+                    # Note: We do NOT save to DB here yet to save writes.
+                    # We save at the end.
                     await status_msg.edit(
                         f"📥 **Indexing...**\n"
-                        f"Found: `{count}`\n"
+                        f"New Found: `{count}`\n"
                         f"Skipped: `{skipped}`\n\n"
                         f"⏳ Processing ID: `{msg.id}`..."
                     )
-                    # Small save every 20 messages to be safe
-                    try:
-                        with open(CACHE_FILE, "w") as f:
-                            json.dump(video_ids, f)
-                    except:
-                        pass
 
         except Exception as e:
             await status_msg.edit(f"❌ **Error:** {e}")
             return
 
-        # Final Save
+        # Final Save to MongoDB
         try:
-            with open(CACHE_FILE, "w") as f:
-                json.dump(video_ids, f)
+            # Save the list (sorted oldest to newest for the forwarder)
+            video_ids.reverse()
+            await db.save_video_list_db(chat_id, video_ids)
             
-            # ✅ CRITICAL FIX: Reset DB checkpoint using CONFIG ID, not the message chat_id
-            await db.save_forwarder_checkpoint(FORWARDER_SOURCE_ID, 0) 
+            # Reset the forwarder checkpoint for THIS specific channel
+            # This ensures if the forwarder is set to this channel, it starts from the beginning
+            await db.save_forwarder_checkpoint(chat_id, 0)
             
             await status_msg.edit(
                 f"✅ **Indexing Complete!**\n\n"
-                f"Total Videos Saved: `{len(video_ids)}`\n"
+                f"Total Videos in DB: `{len(video_ids)}`\n"
                 f"New Videos Added: `{count}`\n\n"
-                f"💡 **Please restart the bot** to load these videos into the Auto Forwarder."
+                f"💡 **Checkpoint Reset** for this channel."
             )
         except Exception as e:
-            logger.error(f"Final Save Error: {e}")
-            await status_msg.edit(f"⚠️ Indexing finished but failed to save file: `{e}`")
+            logger.error(f"Final DB Save Error: {e}")
+            await status_msg.edit(f"⚠️ Indexing finished but failed to save to DB: `{e}`")
