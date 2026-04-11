@@ -233,6 +233,10 @@ async def catch_media(client, message):
 # ADMIN COMMANDS
 # ================================
 
+# ================================
+# ADMIN COMMANDS
+# ================================
+
 @Client.on_message(filters.command("fstatus") & filters.user(ADMIN_IDS))
 async def file_status(client: Client, message: Message):
     video_ids = await db.get_video_list_db(FORWARDER_SOURCE_ID)
@@ -251,10 +255,12 @@ async def file_status(client: Client, message: Message):
         f"💡 `/refresh_cache` to fetch from channel."
     )
 
-    await message.reply(text, parse_mode="markdown")
+    # FIXED: Changed "markdown" to enums.ParseMode.MARKDOWN
+    await message.reply(text, parse_mode=enums.ParseMode.MARKDOWN)
 
 @Client.on_message(filters.command("refresh_cache") & filters.user(ADMIN_IDS))
-async def refresh_cache_cmd(client, message):
+async def refresh_cache_cmd(client: Message):
     msg = await message.reply("🔄 Refreshing video list from channel... please wait.")
     await get_video_list(client, force_refresh=True)
+    # FIXED: Changed .edit() text only, removed parse_mode to avoid issues, or use correct enum
     await msg.edit("✅ Cache Refreshed & Saved to Database!")
