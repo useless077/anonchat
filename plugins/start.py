@@ -242,7 +242,7 @@ async def admin_panel_cb(client, query):
             return
     else:
         # PM Check
-        if user_id != config.OWNER_ID: # Assuming you have OWNER_ID in config, otherwise use a list
+        if user_id != config.ADMIN_IDS: # Assuming you have OWNER_ID in config, otherwise use a list
             # If you use ADMIN_IDS list, do: if user_id not in ADMIN_IDS:
             await query.answer("❌ Owner only!", show_alert=True)
             return
