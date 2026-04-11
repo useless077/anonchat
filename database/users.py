@@ -19,6 +19,7 @@ class Database:
         self.autodelete_settings = self.db["autodelete_settings"]
         self.insta_sessions = self.db["insta_sessions"]
         self.forwarder_checkpoint = self.db["forwarder_checkpoints"]
+        self.cache_col = self.db["bot_cache"]
 
     # ------------------- Connection -------------------
 
@@ -221,6 +222,56 @@ class Database:
             )
         except Exception as e:
             print(f"[DB] Failed to save checkpoint: {e}")
+
+    # ================= VIDEO LIST INDEX (MONGODB) =================
+    
+    async def get_video_list_db(self, source_id):
+        """Retrieve the list of video IDs from MongoDB."""
+        try:
+            data = await self.cache_col.find_one({"_id": f"video_list_{source_id}"})
+            if data and "ids" in data:
+                return data["ids"]
+            return []
+        except Exception as e:
+            print(f"[DB] Error getting video list: {e}")
+            return []
+
+    async def save_video_list_db(self, source_id, video_ids):
+        """Save the list of video IDs to MongoDB."""
+        try:
+            await self.cache_col.update_one(
+                {"_id": f"video_list_{source_id}"},
+                {"$set": {"ids": video_ids}},
+                upsert=True
+            )
+            print(f"[DB] Saved {len(video_ids)} videos to DB.")
+        except Exception as e:
+            print(f"[DB] Error saving video list: {e}")
+
+    # ================= MEDIA GROUP TRACKER (MONGODB) =================
+
+    async def get_media_groups_db(self):
+        """Retrieve all processed media group IDs to prevent duplicates."""
+        try:
+            data = await self.cache_col.find_one({"_id": "processed_media_groups"})
+            if data and "ids" in data:
+                return set(data["ids"]) # Return as a set for fast lookup
+            return set()
+        except Exception as e:
+            print(f"[DB] Error getting media groups: {e}")
+            return set()
+
+    async def add_media_group_db(self, group_id):
+        """Add a media group ID to the processed list."""
+        try:
+            # $addToSet ensures we don't add duplicates
+            await self.cache_col.update_one(
+                {"_id": "processed_media_groups"},
+                {"$addToSet": {"ids": group_id}},
+                upsert=True
+            )
+        except Exception as e:
+            print(f"[DB] Error adding media group: {e}")
 
 
 # ------------------- Shared Instance -------------------
