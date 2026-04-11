@@ -259,8 +259,7 @@ async def file_status(client: Client, message: Message):
     await message.reply(text, parse_mode=enums.ParseMode.MARKDOWN)
 
 @Client.on_message(filters.command("refresh_cache") & filters.user(ADMIN_IDS))
-async def refresh_cache_cmd(client: Message):
+async def refresh_cache_cmd(client: Client, message: Message): # <--- ENSURE client AND message are here
     msg = await message.reply("🔄 Refreshing video list from channel... please wait.")
     await get_video_list(client, force_refresh=True)
-    # FIXED: Changed .edit() text only, removed parse_mode to avoid issues, or use correct enum
     await msg.edit("✅ Cache Refreshed & Saved to Database!")
