@@ -5,7 +5,7 @@ import asyncio
 import logging
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
-from config import ADMIN_IDS
+from config import ADMIN_IDS, FORWARDER_SOURCE_ID
 from database.users import db
 
 logger = logging.getLogger(__name__)
@@ -88,7 +88,6 @@ async def run_indexing(client: Client, status_msg: Message, chat_id, start_id):
         skipped = 0
         
         # Iterate backwards from the starting message
-        # reverse=False means Newest -> Oldest (Standard)
         try:
             async for msg in client.iter_messages(chat_id, offset_id=start_id, reverse=False):
                 
@@ -127,8 +126,8 @@ async def run_indexing(client: Client, status_msg: Message, chat_id, start_id):
             with open(CACHE_FILE, "w") as f:
                 json.dump(video_ids, f)
             
-            # Update DB checkpoint so bot doesn't re-index from start
-            await db.save_forwarder_checkpoint(chat_id, 0) 
+            # ✅ CRITICAL FIX: Reset DB checkpoint using CONFIG ID, not the message chat_id
+            await db.save_forwarder_checkpoint(FORWARDER_SOURCE_ID, 0) 
             
             await status_msg.edit(
                 f"✅ **Indexing Complete!**\n\n"
