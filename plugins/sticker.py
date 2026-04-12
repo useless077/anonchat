@@ -5,7 +5,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.errors import FloodWait
 
-from config import ADMIN_IDS  # <-- adjust if your path is different
+from config import ADMIN_IDS
 
 @Client.on_message(filters.command("repack") & filters.reply & filters.user(ADMIN_IDS))
 async def recreate_sticker_pack_reply(client: Client, message: Message):
@@ -30,6 +30,7 @@ async def recreate_sticker_pack_reply(client: Client, message: Message):
 
     status = await message.reply("⏳ Fetching sticker pack...")
 
+    # Use /tmp for compatibility
     temp_dir = f"/tmp/repack_{old_pack}"
 
     try:
@@ -60,15 +61,18 @@ async def recreate_sticker_pack_reply(client: Client, message: Message):
 
         first_file, first_emoji = downloaded[0]
 
+        # --- PYROGRAM V1 SYNTAX FIX ---
+        # In v1, we pass the file path directly to 'stickers' 
+        # and the emoji string to 'emoji'
         await client.create_sticker_set(
             user_id=me.id,
             title=new_title,
             name=new_name,
-            stickers=[first_file],
-            emoji=first_emoji
+            stickers=[first_file], # List of file paths
+            emoji=first_emoji      # Emoji string
         )
 
-        await asyncio.sleep(5)  # safe gap after creation
+        await asyncio.sleep(5)  # Safe gap
 
         await status.edit("📤 Uploading remaining stickers...")
 
@@ -76,21 +80,23 @@ async def recreate_sticker_pack_reply(client: Client, message: Message):
 
         for file_path, emoji in downloaded[1:]:
             try:
+                # --- PYROGRAM V1 SYNTAX FIX ---
                 await client.add_sticker_to_set(
                     user_id=me.id,
                     name=new_name,
-                    sticker=file_path,
-                    emoji=emoji
+                    sticker=file_path, # File path directly
+                    emoji=emoji        # Emoji string directly
                 )
                 count += 1
 
-                await asyncio.sleep(3)  # safe delay
+                await asyncio.sleep(3)  # Safe delay
 
             except FloodWait as e:
                 wait_time = e.value + 2
                 await status.edit(f"⚠️ FloodWait: Sleeping {wait_time}s...")
                 await asyncio.sleep(wait_time)
 
+                # Retry after FloodWait
                 await client.add_sticker_to_set(
                     user_id=me.id,
                     name=new_name,
@@ -111,4 +117,6 @@ async def recreate_sticker_pack_reply(client: Client, message: Message):
 
     except Exception as e:
         shutil.rmtree(temp_dir, ignore_errors=True)
+        # Show the actual error in the log for debugging
+        print(f"[REPACK ERROR] {e}")
         await status.edit(f"❌ Error: `{e}`")
