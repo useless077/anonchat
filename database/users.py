@@ -18,7 +18,7 @@ class Database:
         self.ai_settings = self.db["ai_settings"]
         self.autodelete_settings = self.db["autodelete_settings"]
         self.insta_sessions = self.db["insta_sessions"]
-        self.forwarder_checkpoint = self.db["forwarder_checkpoints"]
+        self.forwarder_checkpoint = self.db["forwarder_checkpoints"] # This is the collection name
         self.cache_col = self.db["bot_cache"]
 
     # ------------------- Connection -------------------
@@ -201,11 +201,12 @@ class Database:
         await self.insta_sessions.delete_one({"_id": bot_session_name})
 
     # ===================== FORWARDER CHECKPOINT ======================
-
+    
+    # FIXED: Changed self.col to self.forwarder_checkpoint
     async def get_forwarder_checkpoint(self, source_id):
         """Get the last index processed for a source channel."""
         try:
-            data = await self.col.find_one({"_id": "forwarder_checkpoint"})
+            data = await self.forwarder_checkpoint.find_one({"_id": "forwarder_checkpoint"})
             if data:
                 return data.get(str(source_id), 0)
             return 0
@@ -215,7 +216,7 @@ class Database:
     async def save_forwarder_checkpoint(self, source_id, index):
         """Save the last index processed for a source channel."""
         try:
-            await self.col.update_one(
+            await self.forwarder_checkpoint.update_one(
                 {"_id": "forwarder_checkpoint"},
                 {"$set": {str(source_id): index}},
                 upsert=True
