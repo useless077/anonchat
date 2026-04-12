@@ -1,7 +1,6 @@
 import re
 import asyncio
 import logging
-# Ensure we import Pyrogram Client, not anything else
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
 from config import ADMIN_IDS
@@ -81,10 +80,11 @@ async def run_indexing(pyro_client: Client, status_msg: Message, chat_id, start_
         count = 0
         skipped = 0
         
-        # Use get_chat_history instead of iter_messages to be safer
+        # Use get_chat_history
         try:
-            # Iterate backwards from the starting message
-            async for msg in pyro_client.get_chat_history(chat_id, offset_id=start_id, reverse=False):
+            # Iterate backwards from the starting message.
+            # REMOVED 'reverse=False' as it is invalid in Pyrogram v2
+            async for msg in pyro_client.get_chat_history(chat_id, offset_id=start_id):
                 
                 if INDEX_CANCEL:
                     await status_msg.edit(f"🛑 **Cancelled.**\nNew Indexed: `{count}`")
