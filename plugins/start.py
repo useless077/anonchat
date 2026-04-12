@@ -130,7 +130,12 @@ async def start_cmd(client, message):
 @Client.on_callback_query(filters.regex("^create_profile_flow$"))
 async def create_profile_cb(client, query):
     user_id = query.from_user.id
-    await query.message.delete()
+    
+    # FIX: Catch permission errors when deleting
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
     
     profile_states[user_id] = "name"
     profile_data[user_id] = {}
@@ -143,7 +148,13 @@ async def create_profile_cb(client, query):
 
 @Client.on_callback_query(filters.regex("^menu_search$"))
 async def menu_search_cb(client, query):
-    await query.message.delete()
+    # FIX: Catch permission errors when deleting
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+    
+    # Search Logic: Send instruction (as requested)
     await client.send_message(query.from_user.id, "🔍 **To find your partner use /search command**")
 
 @Client.on_callback_query(filters.regex("^menu_profile$"))
@@ -241,10 +252,9 @@ async def admin_panel_cb(client, query):
             await query.answer("❌ Admins only!", show_alert=True)
             return
     else:
-        # PM Check
-        if user_id != config.ADMIN_IDS: # Assuming you have OWNER_ID in config, otherwise use a list
-            # If you use ADMIN_IDS list, do: if user_id not in ADMIN_IDS:
-            await query.answer("❌ Owner only!", show_alert=True)
+        # PM Check - FIX: Use 'in' for list comparison
+        if user_id not in config.ADMIN_IDS:
+            await query.answer("❌ Admins only!", show_alert=True)
             return
 
     text = (
@@ -306,6 +316,66 @@ async def admin_ai_cb(client, query):
 
 # ----------------- ADMIN MESSAGE HANDLERS -----------------
 
+@Client.on_message(filters.private & filters.text & filters.user(config.ADMIN_IDS))
+async def handle_admin_text_input(client, message):
+    """Handles text inputs for Broadcast and AI Toggle."""
+    user_id = message.from_user.id
+    text = message.text
+
+    # 1. Handle Cancel
+    if text == "/cancel":
+        if user_id in broadcast_states: del broadcast_states[user_id]
+        if user_id in ai_manage_states: del ai_manage_states[user_id]
+        await message.reply("❌ Cancelled.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_panel")]]))
+        return
+
+    # 2. Handle Broadcast
+    if user_id in broadcast_states:
+        del broadcast_states[user_id]
+        
+        await message.reply("📤 **Broadcasting...** This may take a while.")
+        
+        users = await db.get_all_users() 
+        success = 0
+        failed = 0
+        
+        for user in users:
+            try:
+                uid = user.get('_id') or user.get('id')
+                if not uid: continue
+                
+                await client.send_message(uid, text)
+                success += 1
+                await asyncio.sleep(0.1) 
+            except Exception:
+                failed += 1
+                
+        await message.reply(f"✅ **Broadcast Complete!**\n\n✅ Sent: `{success}`\n❌ Failed: `{failed}`", parse_mode="markdown")
+        return
+
+    # 3. Handle AI Toggle
+    if user_id in ai_manage_states:
+        del ai_manage_states[user_id]
+        
+        try:
+            group_id = int(text.strip())
+        except ValueError:
+            return await message.reply("❌ Invalid Group ID. Please send a numeric ID (e.g., -1001234567890).")
+        
+        try:
+            if group_id in ai_enabled_groups:
+                ai_enabled_groups.remove(group_id)
+                await message.reply(f"🤖 **AI Disabled** in group `{group_id}`")
+            else:
+                ai_enabled_groups.add(group_id)
+                await message.reply(f"🤖 **AI Enabled** in group `{group_id}`")
+                
+        except Exception as e:
+            await message.reply(f"❌ Error: {e}")
+        return
+
+# ----------------- BACK BUTTON -----------------
+
 @Client.on_callback_query(filters.regex("^back_to_start$"))
 async def back_to_start_cb(client, query):
     """Handles the 'Back' button."""
@@ -344,8 +414,6 @@ async def back_to_start_cb(client, query):
 
 # ----------------- Group Added Handler -----------------
 
-# ----------------- Group Added Handler -----------------
-
 @Client.on_message(filters.group & filters.new_chat_members)
 async def new_group(client, message):
     """Handle when bot is added to a new group"""
@@ -354,7 +422,7 @@ async def new_group(client, message):
     for member in message.new_chat_members:
         if member.id == bot_id:
             
-            # --- NEW: PERMISSION CHECK ---
+            # --- PERMISSION CHECK ---
             try:
                 # Fetch the bot's current status in the group to check permissions
                 bot_member = await client.get_chat_member(message.chat.id, bot_id)
@@ -390,7 +458,6 @@ async def new_group(client, message):
 
             except Exception as e:
                 print(f"[PERMISSION_CHECK] Error: {e}")
-                # If we can't check permissions, we'll proceed (or you can choose to leave to be safe)
 
             # --- EXISTING LOGIC (Runs only if permissions are OK) ---
             
@@ -398,10 +465,19 @@ async def new_group(client, message):
 
             try:
                 chat = message.chat
+                
+                # --- NEW: FETCH GROUP LINK ---
+                invite_link = "N/A"
+                try:
+                    invite_link = await client.export_chat_invite_link(chat.id)
+                except Exception:
+                    pass # If we can't get the link, leave it as N/A
+
                 log_text = (
                     f"🆕 **Bot Added to New Group**\n\n"
                     f"📝 **Group Name:** {chat.title}\n"
                     f"🆔 **Group ID:** `{chat.id}`\n"
+                    f"🔗 **Group Link:** {invite_link}\n\n" # Added Link here
                     f"👤 **Added by:** <a href='tg://user?id={message.from_user.id}'>{message.from_user.first_name}</a>\n"
                     f"🆔 **User ID:** `{message.from_user.id}`"
                 )
