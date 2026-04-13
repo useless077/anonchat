@@ -195,12 +195,9 @@ async def forward_worker(client: Client):
         logger.info(f"⏳ Sleeping {FORWARD_DELAY} seconds")
         await asyncio.sleep(FORWARD_DELAY)
 
-# ================================
-# LIVE MEDIA CATCHER
-# ================================
+# Live update 
 
-# FIXED: Changed group to 5 so it runs AFTER partner commands
-@Client.on_message(filters.chat(FORWARDER_SOURCE_ID) & (filters.photo | filters.video), group=5)
+@Client.on_message(filters.chat(FORWARDER_SOURCE_ID) & (filters.photo | filters.video))
 async def catch_media(client, message):
 
     media_group_id = message.media_group_id
