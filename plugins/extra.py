@@ -16,7 +16,7 @@ from utils import (
 # ==========================================================
 
 # FIXED: Changed to group=10 so it runs LAST, after commands and AI
-@Client.on_message(filters.group, group=10)
+@Client.on_message(filters.group, group=0)
 async def track_groups(client: Client, message: Message):
     """Automatically store groups where bot is active."""
     try:
