@@ -530,7 +530,7 @@ async def end_chat(client: Client, message: Message):
 # ----------------- Relay Messages & Media -----------------
 
 # CRITICAL FIX: Changed to group=0 so it runs FIRST before anything else
-@Client.on_message(filters.private, group=0)
+@Client.on_message(filters.private, group=2)
 async def relay_all(client: Client, message: Message):
     user_id = message.from_user.id
     
