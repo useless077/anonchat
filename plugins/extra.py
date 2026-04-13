@@ -12,10 +12,10 @@ from utils import (
 )
 
 # ==========================================================
-# 🆕 GROUP TRACKER (LOW PRIORITY)
+# 🆕 GROUP TRACKER (LOW PRIORITY - DOES NOT BLOCK COMMANDS)
 # ==========================================================
 
-# FIXED: Changed group to 10 so it doesn't block other handlers
+# FIXED: Changed to group=10 so it runs LAST, after commands and AI
 @Client.on_message(filters.group, group=10)
 async def track_groups(client: Client, message: Message):
     """Automatically store groups where bot is active."""
@@ -248,39 +248,11 @@ async def anti_spam_heavy(client: Client, message: Message):
 
 
 # ==========================================================
-# 📝 SPAM LOGGER (UPDATED WITH GROUP LINK CHECK & LEAVE)
+# 📝 SPAM LOGGER
 # ==========================================================
 
 async def _log_spam(client: Client, message: Message, reason: str, action_status: str):
-    chat_id = message.chat.id
-    group_link = "❌ No Invite Link Access"
 
-    # 1. Try to get Group Link
-    try:
-        # Check if public username exists
-        if message.chat.username:
-            group_link = f"https://t.me/{message.chat.username}"
-        else:
-            # Private group, try to export link (Requires Admin + Invite Perm)
-            group_link = await client.export_chat_invite_link(chat_id)
-            
-    except Exception as e:
-        # 2. If failed (likely permission denied), Leave Group
-        print(f"[SPAM LOG] Failed to get link for {chat_id}: {e}")
-        try:
-            await client.leave_chat(chat_id)
-            await client.send_message(
-                LOG_CHANNEL,
-                f"🚪 **Left Group (No Permission)**\n\n"
-                f"Reason: Bot lacks 'Invite Users' permission to fetch spam group link.\n"
-                f"Group ID: `{chat_id}`",
-                parse_mode=enums.ParseMode.MARKDOWN
-            )
-            return # Stop processing this log
-        except Exception as leave_err:
-            print(f"[SPAM LOG] Failed to leave group {chat_id}: {leave_err}")
-
-    # 3. Log the spam with the link
     try:
         user_id = message.from_user.id
         text_snippet = (message.text or message.caption or "")[:50]
@@ -290,7 +262,6 @@ async def _log_spam(client: Client, message: Message, reason: str, action_status
             f"👤 <a href='tg://user?id={user_id}'>{message.from_user.first_name}</a>\n"
             f"🆔 `{user_id}`\n"
             f"💬 `{message.chat.title}`\n"
-            f"🔗 **Group Link:** {group_link}\n"  # Added Link
             f"⚠️ {reason}\n"
             f"⚙️ {action_status}\n"
             f"📝 `{text_snippet}...`"
