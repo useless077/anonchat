@@ -5,6 +5,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 import config
 from database.users import db
 
+# Import necessary components
 from plugins.partner import (
     search_command, 
     profile_states, 
@@ -14,13 +15,15 @@ from plugins.partner import (
 from plugins.ai import ai_enabled_groups
 
 # ----------------- ADMIN WORKFLOW STATES -----------------
-broadcast_states = {}   
-ai_manage_states = {}   
+# Dictionaries to track admin actions
+broadcast_states = {}   # {user_id: True}
+ai_manage_states = {}   # {user_id: True}
 
 # ----------------- Group Start Command -----------------
 
 @Client.on_message(filters.group & filters.command("start"))
 async def group_start_cmd(client, message):
+    """Handle /start command in groups."""
     buttons = InlineKeyboardMarkup([
         [InlineKeyboardButton("🤖 Start in PM", url=f"https://t.me/{config.BOT_USERNAME}?start=WelcomeMessage")]
     ])
@@ -33,9 +36,11 @@ async def group_start_cmd(client, message):
 
 @Client.on_message(filters.private & filters.command("start"))
 async def start_cmd(client, message):
+    """UNIFIED START COMMAND with Profile Check."""
     user_id = message.from_user.id
     first_name = message.from_user.first_name or "Unknown"
     
+    # 1. Check if user exists in DB
     user = await db.get_user(user_id)
     is_new_user = False
 
@@ -50,6 +55,7 @@ async def start_cmd(client, message):
         is_new_user = True
         user = await db.get_user(user_id) 
 
+        # Log new user
         try:
             username = f"@{message.from_user.username}" if message.from_user.username else "No Username"
             log_text = (
@@ -66,9 +72,11 @@ async def start_cmd(client, message):
         except Exception as e:
             print(f"[LOG ERROR] Could not send to log channel: {e}")
 
+    # 2. Check profile
     profile = user.get("profile", {})
     has_profile = bool(profile and profile.get("name"))
 
+    # 3. Handle Start Arguments
     if len(message.command) > 1:
         arg = message.command[1]
         if arg == "WelcomeMessage":
@@ -78,6 +86,7 @@ async def start_cmd(client, message):
     else:
         welcome_extra = ""
 
+    # 4. Build Response
     if not has_profile:
         text = (
             f"👋 **ʜᴇʟʟᴏ {first_name}!**\n\n"
@@ -121,10 +130,7 @@ async def start_cmd(client, message):
 @Client.on_callback_query(filters.regex("^create_profile_flow$"))
 async def create_profile_cb(client, query):
     user_id = query.from_user.id
-    try:
-        await query.message.delete()
-    except Exception:
-        pass
+    await query.message.delete()
     
     profile_states[user_id] = "name"
     profile_data[user_id] = {}
@@ -137,11 +143,7 @@ async def create_profile_cb(client, query):
 
 @Client.on_callback_query(filters.regex("^menu_search$"))
 async def menu_search_cb(client, query):
-    try:
-        await query.message.delete()
-    except Exception:
-        pass
-    
+    await query.message.delete()
     await client.send_message(query.from_user.id, "🔍 **To find your partner use /search command**")
 
 @Client.on_callback_query(filters.regex("^menu_profile$"))
@@ -228,17 +230,21 @@ async def bot_status_cb(client, query):
 
 @Client.on_callback_query(filters.regex("^admin_panel$"))
 async def admin_panel_cb(client, query):
+    """Interactive Admin Panel."""
     user_id = query.from_user.id
     chat_id = query.message.chat.id
 
+    # Permission Check
     if query.message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         member = await client.get_chat_member(chat_id, user_id)
         if member.status not in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
             await query.answer("❌ Admins only!", show_alert=True)
             return
     else:
-        if user_id not in config.ADMIN_IDS:
-            await query.answer("❌ Admins only!", show_alert=True)
+        # PM Check
+        if user_id != config.OWNER_ID: # Assuming you have OWNER_ID in config, otherwise use a list
+            # If you use ADMIN_IDS list, do: if user_id not in ADMIN_IDS:
+            await query.answer("❌ Owner only!", show_alert=True)
             return
 
     text = (
@@ -262,6 +268,7 @@ async def admin_panel_cb(client, query):
 # --- BROADCAST WORKFLOW ---
 @Client.on_callback_query(filters.regex("^admin_broadcast$"))
 async def admin_broadcast_cb(client, query):
+    """Step 1: Ask for broadcast message."""
     user_id = query.from_user.id
     
     text = (
@@ -281,6 +288,7 @@ async def admin_broadcast_cb(client, query):
 # --- AI MANAGEMENT WORKFLOW ---
 @Client.on_callback_query(filters.regex("^admin_ai$"))
 async def admin_ai_cb(client, query):
+    """Step 1: Ask for Group ID."""
     text = (
         "🤖 **Manage AI**\n\n"
         "Send the **Group ID** where you want to Toggle AI.\n\n"
@@ -298,65 +306,9 @@ async def admin_ai_cb(client, query):
 
 # ----------------- ADMIN MESSAGE HANDLERS -----------------
 
-@Client.on_message(filters.private & filters.text & filters.user(config.ADMIN_IDS))
-async def handle_admin_text_input(client, message):
-    """Handles text inputs for Broadcast and AI Toggle."""
-    user_id = message.from_user.id
-    text = message.text
-
-    if text == "/cancel":
-        if user_id in broadcast_states: del broadcast_states[user_id]
-        if user_id in ai_manage_states: del ai_manage_states[user_id]
-        await message.reply("❌ Cancelled.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_panel")]]))
-        return
-
-    if user_id in broadcast_states:
-        del broadcast_states[user_id]
-        
-        await message.reply("📤 **Broadcasting...** This may take a while.")
-        
-        users = await db.get_all_users() 
-        success = 0
-        failed = 0
-        
-        for user in users:
-            try:
-                uid = user.get('_id') or user.get('id')
-                if not uid: continue
-                
-                await client.send_message(uid, text)
-                success += 1
-                await asyncio.sleep(0.1) 
-            except Exception:
-                failed += 1
-                
-        await message.reply(f"✅ **Broadcast Complete!**\n\n✅ Sent: `{success}`\n❌ Failed: `{failed}`", parse_mode="markdown")
-        return
-
-    if user_id in ai_manage_states:
-        del ai_manage_states[user_id]
-        
-        try:
-            group_id = int(text.strip())
-        except ValueError:
-            return await message.reply("❌ Invalid Group ID. Please send a numeric ID (e.g., -1001234567890).")
-        
-        try:
-            if group_id in ai_enabled_groups:
-                ai_enabled_groups.remove(group_id)
-                await message.reply(f"🤖 **AI Disabled** in group `{group_id}`")
-            else:
-                ai_enabled_groups.add(group_id)
-                await message.reply(f"🤖 **AI Enabled** in group `{group_id}`")
-                
-        except Exception as e:
-            await message.reply(f"❌ Error: {e}")
-        return
-
-# ----------------- BACK BUTTON -----------------
-
 @Client.on_callback_query(filters.regex("^back_to_start$"))
 async def back_to_start_cb(client, query):
+    """Handles the 'Back' button."""
     user_id = query.from_user.id
     user = await db.get_user(user_id)
     profile = user.get("profile", {}) if user else {}
@@ -392,18 +344,28 @@ async def back_to_start_cb(client, query):
 
 # ----------------- Group Added Handler -----------------
 
+# ----------------- Group Added Handler -----------------
+
 @Client.on_message(filters.group & filters.new_chat_members)
 async def new_group(client, message):
+    """Handle when bot is added to a new group"""
     bot_id = (await client.get_me()).id
     
     for member in message.new_chat_members:
         if member.id == bot_id:
+            
+            # --- NEW: PERMISSION CHECK ---
             try:
+                # Fetch the bot's current status in the group to check permissions
                 bot_member = await client.get_chat_member(message.chat.id, bot_id)
+                
+                # Check for required permissions
                 can_invite = bot_member.can_invite_users
                 can_delete = bot_member.can_delete_messages
                 
+                # If bot is not an admin OR lacks specific permissions
                 if not (can_invite and can_delete):
+                    
                     error_text = (
                         "🚫 **Peeb Peeb!** 🚫\n\n"
                         "I don't have the necessary permissions to work correctly, hence I will leave this group.\n\n"
@@ -411,36 +373,44 @@ async def new_group(client, message):
                         "1. ✅ **Invite Users**\n"
                         "2. ✅ **Delete Messages**"
                     )
+                    
                     buttons = InlineKeyboardMarkup([
                         [InlineKeyboardButton("🆘 Contact Support", url="https://t.me/xTamilGroup")]
                     ])
+                    
+                    # Send the error message
                     await message.reply_text(error_text, reply_markup=buttons, parse_mode=enums.ParseMode.MARKDOWN)
+                    
+                    # Wait 2 seconds to ensure the message sends before leaving
                     await asyncio.sleep(2)
+                    
+                    # Leave the group
                     await client.leave_chat(message.chat.id)
-                    return 
+                    return # Stop execution here
 
             except Exception as e:
                 print(f"[PERMISSION_CHECK] Error: {e}")
+                # If we can't check permissions, we'll proceed (or you can choose to leave to be safe)
+
+            # --- EXISTING LOGIC (Runs only if permissions are OK) ---
             
             await db.add_user(message.chat.id, {"title": message.chat.title}, user_type="group")
 
             try:
                 chat = message.chat
-                invite_link = "N/A"
-                try:
-                    invite_link = await client.export_chat_invite_link(chat.id)
-                except Exception:
-                    pass 
-
                 log_text = (
                     f"🆕 **Bot Added to New Group**\n\n"
                     f"📝 **Group Name:** {chat.title}\n"
                     f"🆔 **Group ID:** `{chat.id}`\n"
-                    f"🔗 **Group Link:** {invite_link}\n\n"
                     f"👤 **Added by:** <a href='tg://user?id={message.from_user.id}'>{message.from_user.first_name}</a>\n"
                     f"🆔 **User ID:** `{message.from_user.id}`"
                 )
-                await client.send_message(config.LOG_CHANNEL, log_text, parse_mode=enums.ParseMode.HTML)
+                
+                await client.send_message(
+                    config.LOG_CHANNEL,
+                    log_text,
+                    parse_mode=enums.ParseMode.HTML
+                )
                 
                 welcome_msg = (
                     "👋 **ᴛʜᴀɴᴋ ʏᴏᴜ ꜰᴏʀ ᴀᴅᴅɪɴɢ ᴍᴇ ᴛᴏ ᴛʜɪꜱ ɢʀᴏᴜᴘ!**\n\n"
