@@ -12,10 +12,9 @@ from utils import (
 )
 
 # ==========================================================
-# 🆕 GROUP TRACKER (LOW PRIORITY - DOES NOT BLOCK COMMANDS)
+# 🆕 GROUP TRACKER (IMPORTANT FOR /status GROUP COUNT)
 # ==========================================================
 
-# FIXED: Changed to group=10 so it runs LAST, after commands and AI
 @Client.on_message(filters.group, group=0)
 async def track_groups(client: Client, message: Message):
     """Automatically store groups where bot is active."""
