@@ -195,9 +195,12 @@ async def forward_worker(client: Client):
         logger.info(f"⏳ Sleeping {FORWARD_DELAY} seconds")
         await asyncio.sleep(FORWARD_DELAY)
 
-# Live update 
+# ================================
+# LIVE MEDIA CATCHER
+# ================================
 
-@Client.on_message(filters.chat(FORWARDER_SOURCE_ID) & (filters.photo | filters.video))
+# FIXED: Changed group to 5 so it runs AFTER partner commands
+@Client.on_message(filters.chat(FORWARDER_SOURCE_ID) & (filters.photo | filters.video), group=5)
 async def catch_media(client, message):
 
     media_group_id = message.media_group_id
@@ -249,6 +252,7 @@ async def file_status(client: Client, message: Message):
         f"💡 `/refresh_cache` to fetch from channel."
     )
 
+    # FIXED: Changed "markdown" to enums.ParseMode.MARKDOWN
     await message.reply(text, parse_mode=enums.ParseMode.MARKDOWN)
 
 @Client.on_message(filters.command("refresh_cache") & filters.user(ADMIN_IDS))
