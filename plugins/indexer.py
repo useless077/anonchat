@@ -16,7 +16,7 @@ INDEX_CANCEL = False
 LINK_REGEX = re.compile(r"(https?://)?(t\.me/|telegram\.me/|telegram\.dog/)(c/)?(\d+|[a-zA-Z_0-9]+)/(\d+)$")
 
 
-@Client.on_message(filters.private & (filters.forwarded | filters.text) & filters.user(ADMIN_IDS))
+@Client.on_message(filters.private & (filters.forwarded | filters.text))
 async def index_handler(client: Client, message: Message):
     """Handles forwarded messages or links to trigger indexing."""
     
@@ -53,10 +53,11 @@ async def index_handler(client: Client, message: Message):
     except Exception as e:
         return await message.reply(f"❌ **Access Error:** `{e}`\n\nMake sure bot is Admin in that channel.")
 
-    # 3. Start Indexing IN BACKGROUND (CRITICAL FIX)
+    # 3. Start Indexing (NON-BLOCKING)
+    # We use create_task so it runs in background
+    # We DO NOT await it, otherwise /start will freeze until indexing finishes
     status_msg = await message.reply(f"🔄 **Starting Index...**\nSource: `{chat_id}`\nFrom ID: `{last_msg_id}`")
     
-    # We run the heavy indexing in a separate task so it doesn't block the bot
     asyncio.create_task(run_indexing(client, status_msg, chat_id, last_msg_id))
 
 
@@ -69,14 +70,10 @@ async def cancel_index_cmd(client: Client, message: Message):
 
 
 async def run_indexing(pyro_client: Client, status_msg: Message, chat_id, start_id):
-    """
-    Main loop to fetch and save video IDs to MongoDB.
-    This is now a NON-BLOCKING task because it's launched via asyncio.create_task.
-    """
+    """Main loop to fetch and save video IDs to MongoDB."""
     global INDEX_CANCEL
     INDEX_CANCEL = False
     
-    # Use a lock so we don't start multiple indexes at once
     async with INDEX_LOCK:
         # Load existing IDs from MongoDB to prevent duplicates
         video_ids = await db.get_video_list_db(chat_id)
@@ -88,15 +85,9 @@ async def run_indexing(pyro_client: Client, status_msg: Message, chat_id, start_
         # Use get_chat_history
         try:
             # Iterate backwards from the starting message.
-            # Iterate normally, but ensure we don't re-fetch the start_id unnecessarily if we can avoid it
-            # We will use a while loop that continues until we exceed start_id or finish batch (optional)
-            
-            # Note: get_chat_history(offset_id=X) gets messages *older* than X.
-            # We want messages from `start_id` going *down*.
-            
-            processed_count = 0
-            
-            async for msg in pyro_client.get_chat_history(chat_id, offset_id=start_id):
+            # FIX: Added limit=10000 to prevent runaway loops
+            # FIX: Added asyncio.sleep(0.05) to prevent bot from feeling "blocked/laggy"
+            async for msg in pyro_client.get_chat_history(chat_id, offset_id=start_id, limit=10000):
                 
                 if INDEX_CANCEL:
                     await status_msg.edit(f"🛑 **Cancelled.**\nNew Indexed: `{count}`")
@@ -109,24 +100,13 @@ async def run_indexing(pyro_client: Client, status_msg: Message, chat_id, start_
                         count += 1
                     else:
                         skipped += 1
-                
-                processed_count += 1
 
-                # Optional: Update UI every 20 messages
-                if count % 20 == 0 and count > 0:
-                    try:
-                        await status_msg.edit(
-                            f"📥 **Indexing...**\n"
-                            f"New Found: `{count}`\n"
-                            f"Skipped: `{skipped}`\n\n"
-                            f"⏳ Processing ID: `{msg.id}`..."
-                        )
-                    except Exception:
-                        pass # UI update failure isn't critical
-                
-                # Safety limit: Index max 10000 messages per run
-                if processed_count >= 10000:
-                    break 
+                # CRITICAL FIX FOR "BLOCKING COMMANDS":
+                # Even though this runs in a background task (create_task),
+                # if it hogs the CPU/Database, other commands (/start, /search) feel slow.
+                # We yield control back to the event loop every 50 messages.
+                if count % 50 == 0:
+                    await asyncio.sleep(0.05)
 
         except Exception as e:
             await status_msg.edit(f"❌ **Error:** {e}")
