@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 # CONFIG: Change this to your Source Channel ID
 # ============================================
 # You can hardcode it here, or add it to config.py
-SOURCE_CHANNEL_ID = -1001000000000 # <--- PUT YOUR CHANNEL ID HERE
+SOURCE_CHANNEL_ID = -1003222215181 # <--- PUT YOUR CHANNEL ID HERE
 
 # ============================================
 # INDEX COMMAND (SIMPLE & FAST)
