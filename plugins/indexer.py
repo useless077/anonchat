@@ -8,117 +8,131 @@ from database.users import db
 
 logger = logging.getLogger(__name__)
 
-# Global set to track active indexing tasks
+# Track active indexing users
 ACTIVE_INDEXING = set()
 
-# Regex to detect Telegram Links (Private/Public)
+# Telegram link regex
 LINK_REGEX = re.compile(r"(https?://)?(t\.me/|telegram\.me/|telegram\.dog/)(c/)?(\d+|[a-zA-Z_0-9]+)/(\d+)$")
 
 
-@Client.on_message(filters.command("index"))
-async def ask_link(client: Client, message: Message):
-    """Handles forwarded messages or links to trigger indexing."""
-    
-    # 1. Parse Chat ID and Message ID
-    chat_id = None
-    last_msg_id = None
+# ================================
+# COMMAND HANDLER
+# ================================
 
+@Client.on_message(filters.command("index") & filters.user(ADMIN_IDS))
+async def ask_link(client: Client, message: Message):
+
+    chat_id = None
+    start_msg_id = None
+
+    # ================= LINK PARSE =================
     if message.text:
-        match = LINK_REGEX.match(message.text)
+        match = LINK_REGEX.match(message.text.strip())
         if not match:
-            return # Not a valid link, ignore
+            return await message.reply("❌ Invalid Telegram link.")
 
         raw_chat = match.group(4)
-        last_msg_id = int(match.group(5))
+        start_msg_id = int(match.group(5))
 
         if raw_chat.isnumeric():
             chat_id = int(f"-100{raw_chat}")
         else:
             chat_id = raw_chat
 
+    # ================= FORWARDED =================
     elif message.forward_from_chat and message.forward_from_chat.type in [enums.ChatType.CHANNEL, enums.ChatType.SUPERGROUP]:
-        last_msg_id = message.forward_from_message_id
         chat_id = message.forward_from_chat.username or message.forward_from_chat.id
-    else:
-        return
+        start_msg_id = message.forward_from_message_id
 
-    # 2. Validate Access (Admin Check)
+    else:
+        return await message.reply("❌ Send a valid Telegram post link or forward a message.")
+
+    # ================= ACCESS CHECK =================
     try:
         await client.get_chat(chat_id)
     except Exception as e:
-        return await message.reply(f"❌ **Access Error:** `{e}`\n\nMake sure bot is Admin in that channel.")
+        return await message.reply(f"❌ Access Error:\n`{e}`\n\nMake bot admin in source channel.")
 
-    # 3. Start Indexing (Non-Blocking)
+    # ================= DUPLICATE TASK BLOCK =================
     if message.from_user.id in ACTIVE_INDEXING:
-        return await message.reply("⚠️ You are already indexing a channel. Please wait.")
+        return await message.reply("⚠️ Already indexing. Please wait.")
 
     ACTIVE_INDEXING.add(message.from_user.id)
-    status_msg = await message.reply(f"🔄 **Starting Index...**\nSource: `{chat_id}`\nFrom ID: `{last_msg_id}`")
-    
-    # Run the heavy logic in a separate task
-    asyncio.create_task(run_indexing(client, status_msg, chat_id, last_msg_id))
+
+    status_msg = await message.reply(
+        f"🔄 **Indexing Started**\n\n"
+        f"📡 Source: `{chat_id}`\n"
+        f"📍 From ID: `{start_msg_id}`"
+    )
+
+    asyncio.create_task(run_indexing(client, status_msg, chat_id, start_msg_id))
 
 
-async def run_indexing(pyro_client: Client, status_msg: Message, chat_id, start_id):
-    """Main loop to fetch and save video IDs to MongoDB."""
-    user_id = status_msg.chat.id # Original requester
+# ================================
+# INDEXING LOGIC
+# ================================
+
+async def run_indexing(client: Client, status_msg: Message, chat_id, start_id):
+
+    user_id = status_msg.chat.id
+
     try:
-        # Load existing IDs from MongoDB to prevent duplicates
+        # Load existing IDs
         video_ids = await db.get_video_list_db(chat_id)
-        existing_ids_set = set(video_ids)
-        
-        count = 0
+        existing_ids = set(video_ids)
+
+        new_count = 0
         skipped = 0
 
-        # Use get_chat_history (Non-blocking generator)
-        # Optimized: We fetch history in batches or directly
-        async for msg in pyro_client.get_chat_history(chat_id, offset_id=start_id):
-            
+        async for msg in client.get_chat_history(chat_id, offset_id=start_id):
+
+            # Cancel support
             if user_id not in ACTIVE_INDEXING:
-                # User cancelled indexing
-                await status_msg.edit("🛑 **Cancelled.**")
+                await status_msg.edit("🛑 Indexing Cancelled.")
                 return
 
             if msg.photo or msg.video:
-                if msg.id not in existing_ids_set:
-                    existing_ids_set.add(msg.id)
+                if msg.id not in existing_ids:
+                    existing_ids.add(msg.id)
                     video_ids.append(msg.id)
-                    count += 1
+                    new_count += 1
                 else:
                     skipped += 1
 
-            # Update UI every 20 messages
-            if count % 20 == 0 and count > 0:
+            # UI update every 25
+            if (new_count + skipped) % 25 == 0:
                 await status_msg.edit(
-                    f"📥 **Indexing...**\n"
-                    f"New Found: `{count}`\n"
-                    f"Skipped: `{skipped}`\n\n"
-                    f"⏳ Processing ID: `{msg.id}`..."
+                    f"📥 **Indexing...**\n\n"
+                    f"✅ New: `{new_count}`\n"
+                    f"⏭ Skipped: `{skipped}`\n\n"
+                    f"🔢 Last ID: `{msg.id}`"
                 )
 
     except Exception as e:
-        logger.error(f"[INDEX] Error: {e}")
-        await status_msg.edit(f"❌ **Error:** `{e}`")
+        logger.error(f"[INDEX ERROR] {e}")
+        await status_msg.edit(f"❌ Error:\n`{e}`")
+        return
+
     finally:
-        # Ensure user is removed from set so they can index again
         ACTIVE_INDEXING.discard(user_id)
 
-    # Final Save to MongoDB
+    # ================= FINAL SAVE =================
     try:
-        # Sort: Oldest first for the forwarder
-        video_ids.reverse()
+        # IMPORTANT: oldest → newest
+        video_ids = sorted(set(video_ids))
+
         await db.save_video_list_db(chat_id, video_ids)
-        
-        # Reset the forwarder checkpoint for THIS specific channel
+
+        # Reset checkpoint (start fresh)
         await db.save_forwarder_checkpoint(chat_id, 0)
-        
+
         await status_msg.edit(
             f"✅ **Indexing Complete!**\n\n"
-            f"Total Videos in DB: `{len(video_ids)}`\n"
-            f"New Videos Added: `{count}`\n\n"
-            f"💡 **Checkpoint Reset** for this channel."
+            f"📂 Total Videos: `{len(video_ids)}`\n"
+            f"🆕 New Added: `{new_count}`\n\n"
+            f"🔁 Forwarder restarted from beginning."
         )
 
     except Exception as e:
-        logger.error(f"[FINAL SAVE] Error: {e}")
-        await status_msg.edit(f"⚠️ Indexing finished but failed to save to DB: `{e}`")
+        logger.error(f"[SAVE ERROR] {e}")
+        await status_msg.edit(f"⚠️ Saved failed:\n`{e}`")
