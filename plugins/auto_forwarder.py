@@ -7,14 +7,6 @@ from database.users import db
 from utils import check_bot_permissions
 
 # ================================
-# QUEUE SYSTEM
-# ================================
-
-post_queue = asyncio.Queue()
-# We will load this from DB in the worker
-processed_media_groups = set() 
-
-# ================================
 # SMALL CAPS
 # ================================
 
@@ -46,50 +38,42 @@ CUSTOM_CAPTION_TEXT = (
 )
 
 # ================================
-# VIDEO LIST FETCH (MONGODB)
+# MEDIA GROUP TRACKING
+# ================================
+
+processed_media_groups = set()
+
+# ================================
+# VIDEO LIST FETCH
 # ================================
 
 async def get_video_list(client: Client, force_refresh=False):
-    # 1. Try to load from DB first (Fast)
     if not force_refresh:
         try:
             video_ids = await db.get_video_list_db(FORWARDER_SOURCE_ID)
             if video_ids:
                 return video_ids
-        except Exception:
-            # Silently fail if DB is not accessible yet
+        except:
             pass
 
-    # 2. If not in DB or force refresh, fetch from Telegram
     try:
-        # Fetch a small batch to check connection first
-        async for _ in client.get_chat_history(FORWARDER_SOURCE_ID, limit=1):
-            pass
-        
-        # Proceed with full fetch
         video_ids = []
         async for msg in client.get_chat_history(FORWARDER_SOURCE_ID, limit=10000):
             if msg.photo or msg.video:
                 video_ids.append(msg.id)
-                
-        video_ids.reverse()
-        
-        # 3. Save to DB
-        try:
-            await db.save_video_list_db(FORWARDER_SOURCE_ID, video_ids)
-        except Exception:
-            # If DB save fails, we just continue with in-memory list
-            pass
 
+        video_ids.reverse()
+
+        await db.save_video_list_db(FORWARDER_SOURCE_ID, video_ids)
         return video_ids
-        
+
     except Exception as e:
-        print(f"[FORWARDER] Error fetching history: {e}")
+        print(f"[FORWARDER] Fetch error: {e}")
         return []
 
 
 # ================================
-# DELETE AFTER DELAY
+# AUTO DELETE
 # ================================
 
 async def delete_after_delay(client, chat_id, message_id):
@@ -99,17 +83,18 @@ async def delete_after_delay(client, chat_id, message_id):
     except:
         pass
 
+
 # ================================
 # MAIN WORKER
 # ================================
 
 async def forward_worker(client: Client):
-    # Initialize processed_media_groups from DB to prevent reposts after restart
+
     global processed_media_groups
+
     try:
         processed_media_groups = await db.get_media_groups_db()
-    except Exception:
-        print("[FORWARDER] Could not load media groups from DB")
+    except:
         processed_media_groups = set()
 
     me = await client.get_me()
@@ -122,57 +107,43 @@ async def forward_worker(client: Client):
         [InlineKeyboardButton("🔗 Share me for more videos", url=start_link)]
     ])
 
-    # Load video list from DB (or fetch if empty)
     video_ids = await get_video_list(client)
-
-    # Get current checkpoint
     current_index = await db.get_forwarder_checkpoint(FORWARDER_SOURCE_ID)
-    
+
     refresh_counter = 0
 
     while True:
-        msg_obj = None
-        is_live = False
 
-        # ================= LIVE PRIORITY =================
-        if not post_queue.empty():
+        # Refresh list periodically (important for new videos)
+        refresh_counter += 1
+        if refresh_counter >= 10:
             try:
-                msg_obj = await asyncio.wait_for(post_queue.get(), timeout=1.0)
-                is_live = True
-            except asyncio.TimeoutError:
+                video_ids = await db.get_video_list_db(FORWARDER_SOURCE_ID)
+                refresh_counter = 0
+            except:
                 pass
 
-        # ================= HISTORY =================
-        if not msg_obj:
-            if not video_ids:
-                # No history available (Bot not admin or channel empty)
-                await asyncio.sleep(5)
-                continue
-
-            if current_index >= len(video_ids):
-                current_index = 0 # Loop back to start
-
-            msg_id = video_ids[current_index]
-
-            try:
-                msg_obj = await client.get_messages(FORWARDER_SOURCE_ID, msg_id)
-            except Exception as e:
-                # If get_messages fails, skip this one
-                current_index += 1
-                continue
-
-        if not msg_obj:
+        if not video_ids:
+            await asyncio.sleep(5)
             continue
 
-        # ================= SEND TO ALL GROUPS =================
+        if current_index >= len(video_ids):
+            current_index = 0
+
+        msg_id = video_ids[current_index]
+
+        try:
+            msg_obj = await client.get_messages(FORWARDER_SOURCE_ID, msg_id)
+        except:
+            current_index += 1
+            continue
+
         groups = await db.get_all_groups()
 
         for group in groups:
             chat_id = group["_id"]
 
-            has_permission = await check_bot_permissions(client, chat_id)
-
-            if not has_permission:
+            if not await check_bot_permissions(client, chat_id):
                 continue
 
             try:
@@ -184,30 +155,18 @@ async def forward_worker(client: Client):
                 )
 
                 asyncio.create_task(delete_after_delay(client, chat_id, sent.id))
-                # No logger here to prevent crash
 
-            except Exception as e:
-                # Silently skip groups that error out, don't crash the worker
+            except:
                 continue
 
-        # ================= UPDATE INDEX & REFRESH =================
-        if not is_live:
-            current_index += 1
-            await db.save_forwarder_checkpoint(FORWARDER_SOURCE_ID, current_index)
-            
-            # Periodically refresh DB in background (every 20 loops)
-            refresh_counter += 1
-            if refresh_counter >= 20:
-                try:
-                    await get_video_list(client, force_refresh=True)
-                    refresh_counter = 0
-                except:
-                    pass
+        current_index += 1
+        await db.save_forwarder_checkpoint(FORWARDER_SOURCE_ID, current_index)
 
         await asyncio.sleep(FORWARD_DELAY)
 
+
 # ================================
-# LIVE MEDIA CATCHER
+# MEDIA CATCHER (APPEND MODE)
 # ================================
 
 @Client.on_message(filters.chat(FORWARDER_SOURCE_ID) & (filters.photo | filters.video), group=5)
@@ -215,30 +174,27 @@ async def catch_media(client, message):
 
     media_group_id = message.media_group_id
 
-    if not media_group_id:
-        # Single media (not an album), put in queue immediately
-        await post_queue.put(message)
-        return
+    if media_group_id:
 
-    # Album logic
-    if media_group_id in processed_media_groups:
-        return # Already processed this album
-
-    # New album found
-    processed_media_groups.add(media_group_id)
-    
-    # Save to DB asynchronously so we remember it after restart
-    asyncio.create_task(db.add_media_group_db(media_group_id))
-
-    try:
-        # Fetch all messages in this album
-        media_messages = await client.get_media_group(message.chat.id, message.id)
-        for msg in media_messages:
-            await post_queue.put(msg)
-    except:
-        # If fetching fails, remove from local set so we can try again later
         if media_group_id in processed_media_groups:
-            processed_media_groups.remove(media_group_id)
+            return
+
+        processed_media_groups.add(media_group_id)
+        asyncio.create_task(db.add_media_group_db(media_group_id))
+
+        try:
+            media_messages = await client.get_media_group(message.chat.id, message.id)
+
+            for msg in media_messages:
+                if msg.photo or msg.video:
+                    await db.append_video_id(FORWARDER_SOURCE_ID, msg.id)
+
+        except:
+            processed_media_groups.discard(media_group_id)
+
+    else:
+        await db.append_video_id(FORWARDER_SOURCE_ID, message.id)
+
 
 # ================================
 # ADMIN COMMANDS
@@ -246,26 +202,29 @@ async def catch_media(client, message):
 
 @Client.on_message(filters.command("fstatus") & filters.user(ADMIN_IDS))
 async def file_status(client: Client, message: Message):
+
     video_ids = await db.get_video_list_db(FORWARDER_SOURCE_ID)
     total = len(video_ids)
     current_index = await db.get_forwarder_checkpoint(FORWARDER_SOURCE_ID)
-    pending = post_queue.qsize()
 
     percent = (current_index / total * 100) if total else 0
 
     text = (
         f"🔄 **Forwarder Status**\n\n"
-        f"📂 Total Videos (DB): `{total}`\n"
+        f"📂 Total Videos: `{total}`\n"
         f"📍 Current Index: `{current_index}`\n"
-        f"📊 Progress: `{percent:.2f}%`\n"
-        f"🔴 Live Queue: `{pending}`\n\n"
-        f"💡 `/refresh_cache` to fetch from channel."
+        f"📊 Progress: `{percent:.2f}%`\n\n"
+        f"💡 `/refresh_cache` to reload from source."
     )
 
     await message.reply(text, parse_mode=enums.ParseMode.MARKDOWN)
 
+
 @Client.on_message(filters.command("refresh_cache") & filters.user(ADMIN_IDS))
-async def refresh_cache_cmd(client: Client, message: Message): 
-    msg = await message.reply("🔄 Refreshing video list from channel... please wait.")
+async def refresh_cache_cmd(client: Client, message: Message):
+
+    msg = await message.reply("🔄 Refreshing cache...")
+
     await get_video_list(client, force_refresh=True)
-    await msg.edit("✅ Cache Refreshed & Saved to Database!")
+
+    await msg.edit("✅ Cache refreshed successfully!")
