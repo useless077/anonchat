@@ -3,7 +3,6 @@ import re
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from config import (
-    FORWARDER_SOURCE_ID,
     FORWARDER_DEST_IDS,
     FORWARD_DELAY,
     AUTO_DELETE_DELAY,
@@ -43,10 +42,7 @@ CUSTOM_CAPTION_TEXT = (
     "Join now guys @XtamilChat"
 )
 
-# ================================
-# CACHE
-# ================================
-processed_media_groups = set()
+processed_media_groups = {}
 
 
 # ================================
@@ -61,16 +57,27 @@ async def delete_after_delay(client, chat_id, message_id):
 
 
 # ================================
+# GET ALL SOURCES
+# ================================
+async def get_all_sources():
+    sources = []
+    cursor = db.cache_col.find({"_id": {"$regex": "^video_list_"}})
+
+    async for doc in cursor:
+        source_id = doc["_id"].replace("video_list_", "")
+        try:
+            source_id = int(source_id)
+        except:
+            pass
+        sources.append(source_id)
+
+    return sources
+
+
+# ================================
 # FORWARD WORKER
 # ================================
 async def forward_worker(client: Client):
-
-    global processed_media_groups
-
-    try:
-        processed_media_groups = await db.get_media_groups_db()
-    except:
-        processed_media_groups = set()
 
     me = await client.get_me()
     bot_username = me.username or "AnonymousBot"
@@ -82,93 +89,75 @@ async def forward_worker(client: Client):
         [InlineKeyboardButton("🔗 Share me for more videos", url=start_link)]
     ])
 
-    video_ids = await db.get_video_list_db(FORWARDER_SOURCE_ID)
-    current_index = await db.get_forwarder_checkpoint(FORWARDER_SOURCE_ID)
-
-    if not video_ids:
-        print("[FORWARDER] No videos found in DB")
-        return
-
     while True:
 
-        if current_index >= len(video_ids):
-            current_index = 0
+        sources = await get_all_sources()
 
-        msg_id = video_ids[current_index]
-
-        try:
-            msg_obj = await client.get_messages(FORWARDER_SOURCE_ID, msg_id)
-        except Exception as e:
-            print(f"[FETCH ERROR] {e}")
-            current_index += 1
+        if not sources:
+            print("[FORWARDER] No sources found")
+            await asyncio.sleep(5)
             continue
 
-        # ================= SEND TO GROUPS =================
-        for chat_id in FORWARDER_DEST_IDS:
+        for source_id in sources:
 
-            if not await check_bot_permissions(client, chat_id):
-                print(f"[SKIP] No permission in {chat_id}")
+            video_ids = await db.get_video_list_db(source_id)
+
+            if not video_ids:
                 continue
+
+            video_ids = sorted(video_ids)
+
+            current_index = await db.get_forwarder_checkpoint(source_id)
+
+            if current_index >= len(video_ids):
+                current_index = 0
+
+            msg_id = video_ids[current_index]
 
             try:
-                sent = await msg_obj.copy(
-                    chat_id=chat_id,
-                    caption=caption,
-                    reply_markup=reply_markup,
-                    has_spoiler=True
-                )
-
-                # auto delete
-                asyncio.create_task(delete_after_delay(client, chat_id, sent.id))
-
-                # ================= LOG =================
-                try:
-                    await client.send_message(
-                        LOG_USERS,
-                        f"📤 Sent to `{chat_id}` | Msg `{sent.id}`",
-                        parse_mode=enums.ParseMode.MARKDOWN
-                    )
-                except Exception as log_error:
-                    print(f"[LOG ERROR] {log_error}")
-
+                msg_obj = await client.get_messages(source_id, msg_id)
             except Exception as e:
-                print(f"[FORWARD ERROR] {chat_id} → {e}")
+                print(f"[FETCH ERROR] {source_id} → {e}")
+                await db.save_forwarder_checkpoint(source_id, current_index + 1)
                 continue
 
-        current_index += 1
-        await db.save_forwarder_checkpoint(FORWARDER_SOURCE_ID, current_index)
+            # ================= SEND TO GROUPS =================
+            for chat_id in FORWARDER_DEST_IDS:
 
-        await asyncio.sleep(FORWARD_DELAY)
+                if not await check_bot_permissions(client, chat_id):
+                    print(f"[SKIP] No permission in {chat_id}")
+                    continue
 
+                try:
+                    sent = await msg_obj.copy(
+                        chat_id=chat_id,
+                        caption=caption,
+                        reply_markup=reply_markup,
+                        has_spoiler=True
+                    )
 
-# ================================
-# MEDIA CATCHER (APPEND)
-# ================================
-@Client.on_message(filters.chat(FORWARDER_SOURCE_ID) & (filters.photo | filters.video), group=5)
-async def catch_media(client, message):
+                    asyncio.create_task(delete_after_delay(client, chat_id, sent.id))
 
-    media_group_id = message.media_group_id
+                    # LOG
+                    try:
+                        await client.send_message(
+                            LOG_USERS,
+                            f"📤 `{source_id}` → `{chat_id}` | Msg `{sent.id}`",
+                            parse_mode=enums.ParseMode.MARKDOWN
+                        )
+                    except Exception as log_error:
+                        print(f"[LOG ERROR] {log_error}")
 
-    if media_group_id:
+                except Exception as e:
+                    print(f"[FORWARD ERROR] {chat_id} → {e}")
+                    continue
 
-        if media_group_id in processed_media_groups:
-            return
+            current_index += 1
+            await db.save_forwarder_checkpoint(source_id, current_index)
 
-        processed_media_groups.add(media_group_id)
-        asyncio.create_task(db.add_media_group_db(media_group_id))
+            await asyncio.sleep(FORWARD_DELAY)
 
-        try:
-            media_messages = await client.get_media_group(message.chat.id, message.id)
-
-            for msg in media_messages:
-                if msg.photo or msg.video:
-                    await db.append_video_id(FORWARDER_SOURCE_ID, msg.id)
-
-        except:
-            processed_media_groups.discard(media_group_id)
-
-    else:
-        await db.append_video_id(FORWARDER_SOURCE_ID, message.id)
+        await asyncio.sleep(1)
 
 
 # ================================
@@ -177,16 +166,21 @@ async def catch_media(client, message):
 @Client.on_message(filters.command("fstatus") & filters.user(ADMIN_IDS))
 async def file_status(client: Client, message: Message):
 
-    video_ids = await db.get_video_list_db(FORWARDER_SOURCE_ID)
-    total = len(video_ids)
-    current_index = await db.get_forwarder_checkpoint(FORWARDER_SOURCE_ID)
+    sources = await get_all_sources()
 
-    percent = (current_index / total * 100) if total else 0
+    text = "🔄 **Forwarder Status**\n\n"
 
-    await message.reply(
-        f"🔄 **Forwarder Status**\n\n"
-        f"📂 Total Videos: `{total}`\n"
-        f"📍 Current Index: `{current_index}`\n"
-        f"📊 Progress: `{percent:.2f}%`",
-        parse_mode=enums.ParseMode.MARKDOWN
-    )
+    for source_id in sources:
+        video_ids = await db.get_video_list_db(source_id)
+        total = len(video_ids)
+        current = await db.get_forwarder_checkpoint(source_id)
+        percent = (current / total * 100) if total else 0
+
+        text += (
+            f"📡 `{source_id}`\n"
+            f"📂 Total: `{total}`\n"
+            f"📍 Index: `{current}`\n"
+            f"📊 `{percent:.2f}%`\n\n"
+        )
+
+    await message.reply(text, parse_mode=enums.ParseMode.MARKDOWN)
