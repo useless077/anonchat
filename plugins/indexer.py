@@ -9,10 +9,9 @@ from database.users import db
 
 logger = logging.getLogger(__name__)
 
-# Prevent multiple runs
 INDEXING = set()
 
-# Telegram link (must include message id)
+# Telegram link regex
 LINK_REGEX = re.compile(
     r"(?:https?://)?(?:t\.me|telegram\.me|telegram\.dog)/(?:c/)?([a-zA-Z0-9_]+|\d+)/(\d+)"
 )
@@ -25,7 +24,9 @@ LINK_REGEX = re.compile(
 async def index_handler(client: Client, message: Message):
 
     if len(message.command) < 2:
-        return await message.reply("❌ Send link like:\n/index https://t.me/channel/123")
+        return await message.reply(
+            "❌ Send link like:\n/index https://t.me/channel/123"
+        )
 
     text = message.command[1].strip()
     match = LINK_REGEX.search(text)
@@ -42,13 +43,13 @@ async def index_handler(client: Client, message: Message):
     else:
         chat_id = raw_chat
 
-    # check access
+    # access check
     try:
         await client.get_chat(chat_id)
     except Exception as e:
         return await message.reply(f"❌ Access Error:\n`{e}`")
 
-    # prevent duplicate run
+    # prevent multiple runs
     if message.from_user.id in INDEXING:
         return await message.reply("⚠️ Already indexing...")
 
@@ -75,11 +76,9 @@ async def run_index(client, status_msg, chat_id, last_msg_id):
     errors = 0
 
     try:
-        # load existing
-        saved_ids = set(await db.get_video_list_db(chat_id))
-
         for msg_id in range(1, last_msg_id + 1):
 
+            # cancel support
             if user_id not in INDEXING:
                 await status_msg.edit("🛑 Cancelled")
                 return
@@ -89,7 +88,7 @@ async def run_index(client, status_msg, chat_id, last_msg_id):
             except FloodWait as e:
                 await asyncio.sleep(e.value)
                 continue
-            except Exception:
+            except:
                 errors += 1
                 continue
 
@@ -99,13 +98,20 @@ async def run_index(client, status_msg, chat_id, last_msg_id):
             media = msg.video or msg.photo or msg.document
 
             if media:
-                if msg.id not in saved_ids:
-                    saved_ids.add(msg.id)
-                    total += 1
-                else:
-                    duplicates += 1
+                try:
+                    # ✅ DB handles duplicate automatically
+                    added = await db.append_video_id(chat_id, msg.id)
 
-            # update UI every 50 msgs
+                    if added:
+                        total += 1
+                    else:
+                        duplicates += 1
+
+                except Exception as e:
+                    errors += 1
+                    logger.error(f"Append error: {e}")
+
+            # progress update
             if msg_id % 50 == 0:
                 try:
                     await status_msg.edit(
@@ -118,7 +124,7 @@ async def run_index(client, status_msg, chat_id, last_msg_id):
                 except:
                     pass
 
-            await asyncio.sleep(0.05)  # prevent flood
+            await asyncio.sleep(0.05)
 
     except Exception as e:
         logger.error(e)
@@ -128,19 +134,20 @@ async def run_index(client, status_msg, chat_id, last_msg_id):
     finally:
         INDEXING.discard(user_id)
 
-    # save final
+    # final result
     try:
-        final_list = sorted(saved_ids)
-        await db.save_video_list_db(chat_id, final_list)
+        video_ids = await db.get_video_list_db(chat_id)
 
         await status_msg.edit(
             f"✅ Index Completed\n\n"
-            f"📂 Total Saved: `{len(final_list)}`\n"
-            f"🆕 New: `{total}`\n"
+            f"📡 Source: `{chat_id}`\n"
+            f"📂 Total Stored: `{len(video_ids)}`\n"
+            f"🆕 New Added: `{total}`\n"
             f"⏭ Duplicates: `{duplicates}`"
         )
+
     except Exception as e:
-        await status_msg.edit(f"⚠️ Save Error:\n`{e}`")
+        await status_msg.edit(f"⚠️ Final Error:\n`{e}`")
 
 
 # ================================
