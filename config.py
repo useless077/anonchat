@@ -38,9 +38,10 @@ GROQ_API_KEY = get_env_variable('GROQ_API_KEY', '')
 # MongoDB
 MONGO_URI = get_env_variable(
     'MONGO_URI',
-    'mongodb+srv://tamilmovie:tamilmovie@cluster0.lxatf.mongodb.net/tamilmovie?retryWrites=true&w=majority'
+    'mongodb+srv://tamilchatbot:tamilchatbot@cluster0.dsclawq.mongodb.net/tamilchatbot?retryWrites=true&w=majority'
 )
 MONGO_DB_NAME = get_env_variable('MONGO_DB_NAME', 'anon_chat')
+
 
 # Admin & Logging
 LOG_CHANNEL = int(get_env_variable('LOG_CHANNEL', '-1003058488661'))
