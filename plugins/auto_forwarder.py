@@ -2,14 +2,20 @@ import asyncio
 import re
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
-from config import FORWARDER_SOURCE_ID, FORWARD_DELAY, AUTO_DELETE_DELAY, ADMIN_IDS
+from config import (
+    FORWARDER_SOURCE_ID,
+    FORWARDER_DEST_IDS,
+    FORWARD_DELAY,
+    AUTO_DELETE_DELAY,
+    ADMIN_IDS,
+    LOG_USERS
+)
 from database.users import db
 from utils import check_bot_permissions
 
 # ================================
 # SMALL CAPS
 # ================================
-
 def to_small_caps(text):
     mapping = {
         'a': 'ᴀ','b': 'ʙ','c': 'ᴄ','d': 'ᴅ','e': 'ᴇ','f': 'ғ','g': 'ɢ','h': 'ʜ',
@@ -38,44 +44,14 @@ CUSTOM_CAPTION_TEXT = (
 )
 
 # ================================
-# MEDIA GROUP TRACKING
+# CACHE
 # ================================
-
 processed_media_groups = set()
-
-# ================================
-# VIDEO LIST FETCH
-# ================================
-
-async def get_video_list(client: Client, force_refresh=False):
-    if not force_refresh:
-        try:
-            video_ids = await db.get_video_list_db(FORWARDER_SOURCE_ID)
-            if video_ids:
-                return video_ids
-        except:
-            pass
-
-    try:
-        video_ids = []
-        async for msg in client.get_chat_history(FORWARDER_SOURCE_ID, limit=10000):
-            if msg.photo or msg.video:
-                video_ids.append(msg.id)
-
-        video_ids.reverse()
-
-        await db.save_video_list_db(FORWARDER_SOURCE_ID, video_ids)
-        return video_ids
-
-    except Exception as e:
-        print(f"[FORWARDER] Fetch error: {e}")
-        return []
 
 
 # ================================
 # AUTO DELETE
 # ================================
-
 async def delete_after_delay(client, chat_id, message_id):
     await asyncio.sleep(AUTO_DELETE_DELAY)
     try:
@@ -85,9 +61,8 @@ async def delete_after_delay(client, chat_id, message_id):
 
 
 # ================================
-# MAIN WORKER
+# FORWARD WORKER
 # ================================
-
 async def forward_worker(client: Client):
 
     global processed_media_groups
@@ -107,25 +82,14 @@ async def forward_worker(client: Client):
         [InlineKeyboardButton("🔗 Share me for more videos", url=start_link)]
     ])
 
-    video_ids = await get_video_list(client)
+    video_ids = await db.get_video_list_db(FORWARDER_SOURCE_ID)
     current_index = await db.get_forwarder_checkpoint(FORWARDER_SOURCE_ID)
 
-    refresh_counter = 0
+    if not video_ids:
+        print("[FORWARDER] No videos found in DB")
+        return
 
     while True:
-
-        # Refresh list periodically (important for new videos)
-        refresh_counter += 1
-        if refresh_counter >= 10:
-            try:
-                video_ids = await db.get_video_list_db(FORWARDER_SOURCE_ID)
-                refresh_counter = 0
-            except:
-                pass
-
-        if not video_ids:
-            await asyncio.sleep(5)
-            continue
 
         if current_index >= len(video_ids):
             current_index = 0
@@ -134,16 +98,16 @@ async def forward_worker(client: Client):
 
         try:
             msg_obj = await client.get_messages(FORWARDER_SOURCE_ID, msg_id)
-        except:
+        except Exception as e:
+            print(f"[FETCH ERROR] {e}")
             current_index += 1
             continue
 
-        groups = await db.get_all_groups()
-
-        for group in groups:
-            chat_id = group["_id"]
+        # ================= SEND TO GROUPS =================
+        for chat_id in FORWARDER_DEST_IDS:
 
             if not await check_bot_permissions(client, chat_id):
+                print(f"[SKIP] No permission in {chat_id}")
                 continue
 
             try:
@@ -154,9 +118,21 @@ async def forward_worker(client: Client):
                     has_spoiler=True
                 )
 
+                # auto delete
                 asyncio.create_task(delete_after_delay(client, chat_id, sent.id))
 
-            except:
+                # ================= LOG =================
+                try:
+                    await client.send_message(
+                        LOG_USERS,
+                        f"📤 Sent to `{chat_id}` | Msg `{sent.id}`",
+                        parse_mode=enums.ParseMode.MARKDOWN
+                    )
+                except Exception as log_error:
+                    print(f"[LOG ERROR] {log_error}")
+
+            except Exception as e:
+                print(f"[FORWARD ERROR] {chat_id} → {e}")
                 continue
 
         current_index += 1
@@ -166,9 +142,8 @@ async def forward_worker(client: Client):
 
 
 # ================================
-# MEDIA CATCHER (APPEND MODE)
+# MEDIA CATCHER (APPEND)
 # ================================
-
 @Client.on_message(filters.chat(FORWARDER_SOURCE_ID) & (filters.photo | filters.video), group=5)
 async def catch_media(client, message):
 
@@ -197,9 +172,8 @@ async def catch_media(client, message):
 
 
 # ================================
-# ADMIN COMMANDS
+# STATUS COMMAND
 # ================================
-
 @Client.on_message(filters.command("fstatus") & filters.user(ADMIN_IDS))
 async def file_status(client: Client, message: Message):
 
@@ -209,22 +183,10 @@ async def file_status(client: Client, message: Message):
 
     percent = (current_index / total * 100) if total else 0
 
-    text = (
+    await message.reply(
         f"🔄 **Forwarder Status**\n\n"
         f"📂 Total Videos: `{total}`\n"
         f"📍 Current Index: `{current_index}`\n"
-        f"📊 Progress: `{percent:.2f}%`\n\n"
-        f"💡 `/refresh_cache` to reload from source."
+        f"📊 Progress: `{percent:.2f}%`",
+        parse_mode=enums.ParseMode.MARKDOWN
     )
-
-    await message.reply(text, parse_mode=enums.ParseMode.MARKDOWN)
-
-
-@Client.on_message(filters.command("refresh_cache") & filters.user(ADMIN_IDS))
-async def refresh_cache_cmd(client: Client, message: Message):
-
-    msg = await message.reply("🔄 Refreshing cache...")
-
-    await get_video_list(client, force_refresh=True)
-
-    await msg.edit("✅ Cache refreshed successfully!")
