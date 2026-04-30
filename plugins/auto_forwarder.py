@@ -1,159 +1,186 @@
-import re
 import asyncio
-import logging
-from pyrogram import Client, filters
-from pyrogram.types import Message
-from pyrogram.errors import FloodWait
-from config import ADMIN_IDS
+import re
+from pyrogram import Client, filters, enums
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from config import (
+    FORWARDER_DEST_IDS,
+    FORWARD_DELAY,
+    AUTO_DELETE_DELAY,
+    ADMIN_IDS,
+    LOG_USERS
+)
 from database.users import db
+from utils import check_bot_permissions
 
-logger = logging.getLogger(__name__)
+# ================================
+# SMALL CAPS
+# ================================
+def to_small_caps(text):
+    mapping = {
+        'a': 'ᴀ','b': 'ʙ','c': 'ᴄ','d': 'ᴅ','e': 'ᴇ','f': 'ғ','g': 'ɢ','h': 'ʜ',
+        'i': 'ɪ','j': 'ᴊ','k': 'ᴋ','l': 'ʟ','m': 'ᴍ','n': 'ɴ','o': 'ᴏ','p': 'ᴘ',
+        'r': 'ʀ','t': 'ᴛ','u': 'ᴜ','v': 'ᴠ','w': 'ᴡ'
+    }
+    mapping.update({k.upper(): v for k, v in mapping.items()})
 
-INDEXING = set()
+    pattern = r'(@\w+|https?://\S+|t\.me/\S+)'
+    parts = re.split(pattern, text)
 
-# Telegram link regex
-LINK_REGEX = re.compile(
-    r"(?:https?://)?(?:t\.me|telegram\.me|telegram\.dog)/(?:c/)?([a-zA-Z0-9_]+|\d+)/(\d+)"
+    result = ""
+    for part in parts:
+        if re.match(pattern, part):
+            result += part
+        else:
+            result += "".join(mapping.get(c, c) for c in part)
+
+    return result
+
+
+CUSTOM_CAPTION_TEXT = (
+    "Just add me in your group for more videos\n\n"
+    "Start me and get your partner now 😜❤️\n\n"
+    "Join now guys @XtamilChat"
 )
 
+processed_media_groups = {}
+
 
 # ================================
-# COMMAND
+# AUTO DELETE
 # ================================
-@Client.on_message(filters.command("index") & filters.user(ADMIN_IDS))
-async def index_handler(client: Client, message: Message):
-
-    if len(message.command) < 2:
-        return await message.reply(
-            "❌ Send link like:\n/index https://t.me/channel/123"
-        )
-
-    text = message.command[1].strip()
-    match = LINK_REGEX.search(text)
-
-    if not match:
-        return await message.reply("❌ Invalid Telegram link.")
-
-    raw_chat = match.group(1)
-    last_msg_id = int(match.group(2))
-
-    # convert chat id
-    if raw_chat.isnumeric():
-        chat_id = int(f"-100{raw_chat}")
-    else:
-        chat_id = raw_chat
-
-    # access check
+async def delete_after_delay(client, chat_id, message_id):
+    await asyncio.sleep(AUTO_DELETE_DELAY)
     try:
-        await client.get_chat(chat_id)
-    except Exception as e:
-        return await message.reply(f"❌ Access Error:\n`{e}`")
-
-    # prevent multiple runs
-    if message.from_user.id in INDEXING:
-        return await message.reply("⚠️ Already indexing...")
-
-    INDEXING.add(message.from_user.id)
-
-    status = await message.reply(
-        f"🔄 Indexing started\n\n"
-        f"📡 Chat: `{chat_id}`\n"
-        f"📍 Last ID: `{last_msg_id}`"
-    )
-
-    asyncio.create_task(run_index(client, status, chat_id, last_msg_id))
+        await client.delete_messages(chat_id, message_id)
+    except:
+        pass
 
 
 # ================================
-# INDEX LOGIC
+# GET ALL SOURCES
 # ================================
-async def run_index(client, status_msg, chat_id, last_msg_id):
+async def get_all_sources():
+    sources = []
+    cursor = db.cache_col.find({"_id": {"$regex": "^video_list_"}})
 
-    user_id = status_msg.chat.id
+    async for doc in cursor:
+        source_id = doc["_id"].replace("video_list_", "")
+        try:
+            source_id = int(source_id)
+        except:
+            pass
+        sources.append(source_id)
 
-    total = 0
-    duplicates = 0
-    errors = 0
+    return sources
 
-    try:
-        for msg_id in range(1, last_msg_id + 1):
 
-            # cancel support
-            if user_id not in INDEXING:
-                await status_msg.edit("🛑 Cancelled")
-                return
+# ================================
+# FORWARD WORKER
+# ================================
+async def forward_worker(client: Client):
+
+    me = await client.get_me()
+    bot_username = me.username or "AnonymousBot"
+    start_link = f"https://t.me/{bot_username}?start=start"
+
+    caption = to_small_caps(CUSTOM_CAPTION_TEXT)
+
+    reply_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔗 Share me for more videos", url=start_link)]
+    ])
+
+    while True:
+
+        sources = await get_all_sources()
+
+        if not sources:
+            print("[FORWARDER] No sources found")
+            await asyncio.sleep(5)
+            continue
+
+        for source_id in sources:
+
+            video_ids = await db.get_video_list_db(source_id)
+
+            if not video_ids:
+                continue
+
+            video_ids = sorted(video_ids)
+
+            current_index = await db.get_forwarder_checkpoint(source_id)
+
+            if current_index >= len(video_ids):
+                current_index = 0
+
+            msg_id = video_ids[current_index]
 
             try:
-                msg = await client.get_messages(chat_id, msg_id)
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                continue
-            except:
-                errors += 1
+                msg_obj = await client.get_messages(source_id, msg_id)
+            except Exception as e:
+                print(f"[FETCH ERROR] {source_id} → {e}")
+                await db.save_forwarder_checkpoint(source_id, current_index + 1)
                 continue
 
-            if not msg or msg.empty:
-                continue
+            # ================= SEND TO GROUPS =================
+            for chat_id in FORWARDER_DEST_IDS:
 
-            media = msg.video or msg.photo or msg.document
+                if not await check_bot_permissions(client, chat_id):
+                    print(f"[SKIP] No permission in {chat_id}")
+                    continue
 
-            if media:
                 try:
-                    # ✅ DB handles duplicate automatically
-                    added = await db.append_video_id(chat_id, msg.id)
+                    sent = await msg_obj.copy(
+                        chat_id=chat_id,
+                        caption=caption,
+                        reply_markup=reply_markup,
+                        has_spoiler=True
+                    )
 
-                    if added:
-                        total += 1
-                    else:
-                        duplicates += 1
+                    asyncio.create_task(delete_after_delay(client, chat_id, sent.id))
+
+                    # LOG
+                    try:
+                        await client.send_message(
+                            LOG_USERS,
+                            f"📤 `{source_id}` → `{chat_id}` | Msg `{sent.id}`",
+                            parse_mode=enums.ParseMode.MARKDOWN
+                        )
+                    except Exception as log_error:
+                        print(f"[LOG ERROR] {log_error}")
 
                 except Exception as e:
-                    errors += 1
-                    logger.error(f"Append error: {e}")
+                    print(f"[FORWARD ERROR] {chat_id} → {e}")
+                    continue
 
-            # progress update
-            if msg_id % 50 == 0:
-                try:
-                    await status_msg.edit(
-                        f"📥 Indexing...\n\n"
-                        f"📊 Processed: `{msg_id}`\n"
-                        f"✅ Saved: `{total}`\n"
-                        f"⏭ Duplicates: `{duplicates}`\n"
-                        f"⚠️ Errors: `{errors}`"
-                    )
-                except:
-                    pass
+            current_index += 1
+            await db.save_forwarder_checkpoint(source_id, current_index)
 
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(FORWARD_DELAY)
 
-    except Exception as e:
-        logger.error(e)
-        await status_msg.edit(f"❌ Error:\n`{e}`")
-        return
+        await asyncio.sleep(1)
 
-    finally:
-        INDEXING.discard(user_id)
 
-    # final result
-    try:
-        video_ids = await db.get_video_list_db(chat_id)
+# ================================
+# STATUS COMMAND
+# ================================
+@Client.on_message(filters.command("fstatus") & filters.user(ADMIN_IDS))
+async def file_status(client: Client, message: Message):
 
-        await status_msg.edit(
-            f"✅ Index Completed\n\n"
-            f"📡 Source: `{chat_id}`\n"
-            f"📂 Total Stored: `{len(video_ids)}`\n"
-            f"🆕 New Added: `{total}`\n"
-            f"⏭ Duplicates: `{duplicates}`"
+    sources = await get_all_sources()
+
+    text = "🔄 **Forwarder Status**\n\n"
+
+    for source_id in sources:
+        video_ids = await db.get_video_list_db(source_id)
+        total = len(video_ids)
+        current = await db.get_forwarder_checkpoint(source_id)
+        percent = (current / total * 100) if total else 0
+
+        text += (
+            f"📡 `{source_id}`\n"
+            f"📂 Total: `{total}`\n"
+            f"📍 Index: `{current}`\n"
+            f"📊 `{percent:.2f}%`\n\n"
         )
 
-    except Exception as e:
-        await status_msg.edit(f"⚠️ Final Error:\n`{e}`")
-
-
-# ================================
-# STOP COMMAND
-# ================================
-@Client.on_message(filters.command("stop") & filters.user(ADMIN_IDS))
-async def stop_index(client, message):
-    INDEXING.discard(message.from_user.id)
-    await message.reply("🛑 Indexing stopped.")
+    await message.reply(text, parse_mode=enums.ParseMode.MARKDOWN)
