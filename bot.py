@@ -78,7 +78,7 @@ class Bot(Client):
 
             # 2. Then, start the worker that posts videos every 15 mins
             logging.info("Starting Auto Forwarder Worker...")
-         #   asyncio.create_task(forward_worker(self))
+            asyncio.create_task(forward_worker(self))
             # ------------------------------------
             
         except Exception as e:
