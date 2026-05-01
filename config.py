@@ -71,7 +71,7 @@ SHRINKME_API = get_env_variable("SHRINKME_API", "e5ef4c5062c74ffe02009e4fc8f2fe8
 # ============================
 
 ENABLE_TERABOX = get_env_variable("ENABLE_TERABOX", "true").lower() == "true"
-ENABLE_SHRINKME = get_env_variable("ENABLE_SHRINKME", "true").lower() == "true"
+ENABLE_SHRINKME = get_env_variable("ENABLE_SHRINKME", "false").lower() == "true"
 
 # List of Group IDs to post to
 FORWARDER_DEST_IDS = list(map(int, get_env_variable('FORWARDER_DEST_IDS', '-1002263740263,-1002193362290').split(",")))
