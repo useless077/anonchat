@@ -66,12 +66,19 @@ FORWARDER_SOURCE_ID = int(get_env_variable('FORWARDER_SOURCE_ID', '-100322221518
 TERABOX_API = get_env_variable("TERABOX_API", "60ed7669ccdeda1ea99067acd9dcdbe62e3d2d5e")
 SHRINKME_API = get_env_variable("SHRINKME_API", "e5ef4c5062c74ffe02009e4fc8f2fe8f089114c1")
 
+# ============================
+# SHORTLINK CONTROL SWITCHES
+# ============================
+
+ENABLE_TERABOX = get_env_variable("ENABLE_TERABOX", "true").lower() == "true"
+ENABLE_SHRINKME = get_env_variable("ENABLE_SHRINKME", "true").lower() == "true"
+
 # List of Group IDs to post to
 FORWARDER_DEST_IDS = list(map(int, get_env_variable('FORWARDER_DEST_IDS', '-1002263740263,-1002193362290').split(",")))
 
 # Time gaps (in seconds)
-FORWARD_DELAY = 30 * 60    # 15 minutes between posts
-AUTO_DELETE_DELAY = 29 * 60 # 14 minutes after posting
+FORWARD_DELAY = 30 * 60    # 30 minutes between posts
+AUTO_DELETE_DELAY = 29 * 60 # 29 minutes after posting
 
 # Leave this empty. The bot will find free proxies automatically for you.
 INSTA_PROXIES = [] 
