@@ -1,6 +1,5 @@
 import asyncio
 import re
-import random
 import aiohttp
 
 from pyrogram import Client, filters
@@ -14,9 +13,7 @@ from config import (
     LOG_USERS,
     BOT_USERNAME,
     TERABOX_API,
-    SHRINKME_API,
-    ENABLE_TERABOX,
-    ENABLE_SHRINKME
+    ENABLE_TERABOX
 )
 
 from database.users import db
@@ -52,7 +49,7 @@ CUSTOM_CAPTION_TEXT = (
     "⚡ Fast Download Available ⚡\n"
     "👇 Click Below Button 👇\n\n"
     "💥 <b>DOWNLOAD NOW</b> 💥\n\n"
-    "📍 ᴊᴏɪɴ ɴᴏᴡ ɢᴜʏs @XtamilChat"
+    "📍 ᴊᴏɪɴ ɴᴏᴡ @XtamilChat"
 )
 
 
@@ -89,7 +86,7 @@ async def get_all_sources():
 # GET LINK
 # ================================
 async def get_download_link(msg_obj):
-    if msg_obj.caption:
+    if msg_obj and msg_obj.caption:
         urls = re.findall(r'(https?://\S+)', msg_obj.caption)
         if urls:
             return urls[0]
@@ -97,7 +94,7 @@ async def get_download_link(msg_obj):
 
 
 # ================================
-# SHORTLINK (TERABOX ONLY SAFE)
+# SHORTLINK (TERABOX ONLY)
 # ================================
 async def shorten_with_terabox(url):
     try:
@@ -111,8 +108,6 @@ async def shorten_with_terabox(url):
 
 
 async def shorten_url(url):
-
-    # OFF switch
     if not ENABLE_TERABOX:
         return url
 
@@ -124,7 +119,7 @@ async def shorten_url(url):
 
 
 # ================================
-# FORWARDER
+# FORWARDER WORKER
 # ================================
 async def forward_worker(client: Client):
 
@@ -153,15 +148,21 @@ async def forward_worker(client: Client):
 
             msg_id = video_ids[index]
 
+            # ================= SAFE MESSAGE FETCH =================
             try:
                 msg_obj = await client.get_messages(source_id, msg_id)
-            except:
+            except Exception as e:
+                print(f"[GET MESSAGE ERROR] {e}")
                 await db.save_forwarder_checkpoint(source_id, index + 1)
                 continue
 
+            if not msg_obj:
+                await db.save_forwarder_checkpoint(source_id, index + 1)
+                continue
+
+            # ================= LINK EXTRACTION =================
             link = await get_download_link(msg_obj)
 
-            # SAFE FIX (NO BOT START FALLBACK BUG)
             if not link:
                 await db.save_forwarder_checkpoint(source_id, index + 1)
                 continue
@@ -178,6 +179,7 @@ async def forward_worker(client: Client):
                 [InlineKeyboardButton("🔗 Share", url=start_link)]
             ])
 
+            # ================= SEND TO GROUPS =================
             for chat_id in FORWARDER_DEST_IDS:
 
                 if not await check_bot_permissions(client, chat_id):
@@ -191,12 +193,13 @@ async def forward_worker(client: Client):
                         has_spoiler=True
                     )
 
-                    asyncio.create_task(
-                        delete_after_delay(client, chat_id, sent.id)
-                    )
+                    if sent:
+                        asyncio.create_task(
+                            delete_after_delay(client, chat_id, sent.id)
+                        )
 
                 except Exception as e:
-                    print("Forward error:", e)
+                    print(f"[FORWARD ERROR] {e}")
 
             index += 1
             await db.save_forwarder_checkpoint(source_id, index)
@@ -207,7 +210,7 @@ async def forward_worker(client: Client):
 
 
 # ================================
-# STATUS
+# STATUS COMMAND
 # ================================
 @Client.on_message(filters.command("fstatus") & filters.user(ADMIN_IDS))
 async def file_status(client: Client, message: Message):
