@@ -255,19 +255,45 @@ async def _log_spam(client: Client, message: Message, reason: str, action_status
 
     try:
         user_id = message.from_user.id
+        chat = message.chat
+
         text_snippet = (message.text or message.caption or "")[:50]
+
+        # ================= GROUP LINK (SMART FIX) =================
+        group_link = "N/A"
+
+        try:
+            if chat.username:
+                # public group
+                group_link = f"https://t.me/{chat.username}"
+
+            else:
+                # private group → try invite link
+                try:
+                    invite = await client.export_chat_invite_link(chat.id)
+                    group_link = invite if invite else f"Private Group ID: {chat.id}"
+                except:
+                    group_link = f"Private Group ID: {chat.id}"
+
+        except:
+            group_link = f"Group ID: {chat.id}"
 
         log_text = (
             f"🚫 **Spam Detected**\n\n"
             f"👤 <a href='tg://user?id={user_id}'>{message.from_user.first_name}</a>\n"
             f"🆔 `{user_id}`\n"
-            f"💬 `{message.chat.title}`\n"
+            f"💬 `{chat.title}`\n"
+            f"🔗 Group: {group_link}\n"
             f"⚠️ {reason}\n"
             f"⚙️ {action_status}\n"
             f"📝 `{text_snippet}...`"
         )
 
-        await client.send_message(LOG_CHANNEL, log_text, parse_mode=enums.ParseMode.HTML)
+        await client.send_message(
+            LOG_CHANNEL,
+            log_text,
+            parse_mode=enums.ParseMode.HTML
+        )
 
     except Exception as e:
         print(f"[LOG ERROR] {e}")
