@@ -3,7 +3,7 @@ import re
 import random
 import aiohttp
 
-from pyrogram import Client, filters, enums
+from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config import (
@@ -14,7 +14,9 @@ from config import (
     LOG_USERS,
     BOT_USERNAME,
     TERABOX_API,
-    SHRINKME_API
+    SHRINKME_API,
+    ENABLE_TERABOX,
+    ENABLE_SHRINKME
 )
 
 from database.users import db
@@ -35,14 +37,11 @@ def to_small_caps(text):
     pattern = r'(@\w+|https?://\S+|t\.me/\S+)'
     parts = re.split(pattern, text)
 
-    result = ""
-    for part in parts:
-        if re.match(pattern, part):
-            result += part
-        else:
-            result += "".join(mapping.get(c, c) for c in part)
-
-    return result
+    return "".join(
+        part if re.match(pattern, part)
+        else "".join(mapping.get(c, c) for c in part)
+        for part in parts
+    )
 
 
 # ================================
@@ -53,7 +52,7 @@ CUSTOM_CAPTION_TEXT = (
     "⚡ Fast Download Available ⚡\n"
     "👇 Click Below Button 👇\n\n"
     "💥 <b>DOWNLOAD NOW</b> 💥\n\n"
-    "📍 ᴊᴏɪɴ ɴᴏᴡ ɢᴜys @XtamilChat" 
+    "📍 ᴊᴏɪɴ ɴᴏᴡ ɢᴜʏs @XtamilChat"
 )
 
 
@@ -69,7 +68,7 @@ async def delete_after_delay(client, chat_id, message_id):
 
 
 # ================================
-# GET SOURCES
+# SOURCES
 # ================================
 async def get_all_sources():
     sources = []
@@ -98,7 +97,7 @@ async def get_download_link(msg_obj):
 
 
 # ================================
-# SHORTLINK SYSTEM
+# SHORTLINK (TERABOX ONLY SAFE)
 # ================================
 async def shorten_with_terabox(url):
     try:
@@ -111,34 +110,15 @@ async def shorten_with_terabox(url):
         return None
 
 
-async def shorten_with_shrinkme(url):
-    try:
-        api = f"https://shrinkme.io/api?api={SHRINKME_API}&url={url}"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(api) as r:
-                data = await r.json()
-                return data.get("shortenedUrl")
-    except:
-        return None
-
-
 async def shorten_url(url):
-    if not TERABOX_API and not SHRINKME_API:
+
+    # OFF switch
+    if not ENABLE_TERABOX:
         return url
 
-    services = ["terabox", "shrinkme"]
-    random.shuffle(services)
-
-    for s in services:
-        if s == "terabox":
-            res = await shorten_with_terabox(url)
-            if res:
-                return res
-
-        if s == "shrinkme":
-            res = await shorten_with_shrinkme(url)
-            if res:
-                return res
+    res = await shorten_with_terabox(url)
+    if res:
+        return res
 
     return url
 
@@ -180,8 +160,11 @@ async def forward_worker(client: Client):
                 continue
 
             link = await get_download_link(msg_obj)
+
+            # SAFE FIX (NO BOT START FALLBACK BUG)
             if not link:
-                link = start_link
+                await db.save_forwarder_checkpoint(source_id, index + 1)
+                continue
 
             short_link = await shorten_url(link)
 
@@ -224,7 +207,7 @@ async def forward_worker(client: Client):
 
 
 # ================================
-# STATUS COMMAND
+# STATUS
 # ================================
 @Client.on_message(filters.command("fstatus") & filters.user(ADMIN_IDS))
 async def file_status(client: Client, message: Message):
